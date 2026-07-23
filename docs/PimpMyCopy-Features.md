@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.9 | Last Updated: 2026-07-15T12:00:00Z -->
+<!-- Version: 1.10 | Last Updated: 2026-07-23T00:00:00Z -->
 
 ---
 
@@ -827,6 +827,64 @@ Three changes were applied:
 ### Result
 
 Crawling a site with a blog section (e.g. `sharpen.studio/blog/`) now returns all blog pages listed in the sitemap alongside other pages on the site.
+
+---
+
+## Website Crawler — HTML Link-Harvest Fallback
+
+**Added:** 2026-07-23
+**Component:** `src/components/Crawler.tsx` — `handleCrawl()`
+**Firecrawl Endpoint:** `/v1/scrape` (via `firecrawl-proxy` edge function)
+
+### Problem
+
+In standard crawl mode, URL discovery relied on two sources: Firecrawl `/v1/map` plus sitemap.xml candidates fetched directly. Sites with no published sitemap (e.g. Webflow sites with auto-sitemap disabled) returned only the homepage from `/v1/map`, even when the homepage HTML contained normal `<a href>` navigation links to other pages on the same site.
+
+### Solution
+
+A third discovery source — an HTML link-harvest fallback — was added to `handleCrawl()`. It is inserted in the crawl flow **after** the sitemap supplement block and **before** the `pathPrefix` filter, so all existing downstream filtering (NON_PAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, pathPrefix, pagesOnly) runs unchanged on the merged URL set.
+
+### Trigger Condition
+
+The harvest block runs only when `baseLinks.length <= 2` after the map + sitemap steps have completed. If map/sitemap already produced a healthy list of URLs, the harvest is skipped entirely.
+
+### First-Level Harvest (Homepage)
+
+1. The loading message is set to `Extracting links from homepage HTML...`.
+2. The existing `firecrawl-proxy` edge function is called with:
+   - `endpoint: '/v1/scrape'`
+   - `body: { url: 'https://${rootHost}', formats: ['html', 'rawHtml', 'links'] }`
+3. Candidate URLs are collected from two sources:
+   - **(a)** `scrapeData.data.links` — if it is an array, each entry is read as a string or as an object's `.url` field.
+   - **(b)** `scrapeData.data.html || scrapeData.data.rawHtml` — parsed with `DOMParser`, and every `a[href]` element's `href` attribute is collected.
+4. Each candidate is normalized with `new URL(href, 'https://${rootHost}').href` inside a try/catch — anything that throws is skipped.
+5. Filtering rules:
+   - Keep only URLs whose hostname equals `rootHost` (a leading `www.` is stripped from both sides before comparing).
+   - Discard `mailto:`, `tel:`, `javascript:` hrefs.
+   - Discard any href that is exactly `#` or starts with `#`.
+   - Strip URL fragments (`u.hash = ''`) before adding. Query strings are preserved.
+6. Harvested URLs are merged into `baseLinks` via `new Set([...baseLinks, ...harvested])` and a console log is emitted: `HTML link harvest added ${harvested.length} URLs, total: ${baseLinks.length}`.
+
+### Second-Level Harvest (Interior Pages)
+
+After the first-level merge, if `baseLinks.length` is still `<= 5`, a second-level pass runs:
+
+- Up to 5 newly harvested URLs (those added by the first pass, not the original map results) are scraped in parallel via `Promise.all`, each using the same `/v1/scrape` call and harvesting logic described above.
+- All second-level harvested URLs are merged into `baseLinks` via `new Set(...)`.
+- A console log is emitted: `HTML link harvest (second pass) added ${secondHarvested.length} URLs, total: ${baseLinks.length}`.
+- The pass does **not** recurse beyond this second level.
+
+### Abort Handling
+
+`abortControllerRef.current?.signal.aborted` is checked before the first-level harvest and before the second-level pass. If the user has cancelled the crawl, the block throws `Operation cancelled by user`, which propagates up and aborts the crawl as usual.
+
+### Error Handling
+
+The entire harvest block is wrapped in a try/catch. The only error that re-throws is `Operation cancelled by user`. Any other failure (network error, parse error, unexpected response shape) is logged via `console.error('HTML link harvest failed:', err)` and the crawl continues silently — this is a best-effort supplement and must never abort the crawl.
+
+### Token Tracking
+
+For every `/v1/scrape` call made in this block, `tokensUsed` is incremented by `scrapeData.creditsUsed` (or `1` if `creditsUsed` is absent). The increment uses the same `setTokensUsed` + `updateTokensInDatabase` pattern already used elsewhere in `handleCrawl()`.
 
 ---
 

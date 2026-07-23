@@ -605,6 +605,129 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
           // sitemap supplement is best-effort
         }
 
+        // HTML link-harvest fallback: when map/sitemap produced too few URLs,
+        // scrape the homepage and extract <a href> links directly from the HTML.
+        // This catches sites with no published sitemap (e.g. Webflow with auto-sitemap off).
+        try {
+          const stripWww = (h: string) => h.replace(/^www\./, '');
+
+          const harvestFromUrl = async (pageUrl: string): Promise<string[]> => {
+            const scrapeResp = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+              body: JSON.stringify({
+                endpoint: '/v1/scrape',
+                body: { url: pageUrl, formats: ['html', 'rawHtml', 'links'] },
+              }),
+            });
+
+            if (!scrapeResp.ok) return [];
+
+            const scrapeData = await scrapeResp.json();
+
+            // Token tracking
+            const credits = scrapeData.creditsUsed ?? (scrapeData.success ? 1 : 0);
+            if (credits) {
+              setTokensUsed(prev => {
+                const newTotal = prev + credits;
+                updateTokensInDatabase(newTotal);
+                return newTotal;
+              });
+            }
+
+            const candidates: string[] = [];
+
+            // (a) links array from Firecrawl
+            const linksField = scrapeData.data?.links;
+            if (Array.isArray(linksField)) {
+              for (const link of linksField) {
+                const href = typeof link === 'string' ? link : (link?.url ?? '');
+                if (href) candidates.push(href);
+              }
+            }
+
+            // (b) parse HTML for a[href]
+            const htmlSource = scrapeData.data?.html || scrapeData.data?.rawHtml || '';
+            if (htmlSource) {
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(htmlSource, 'text/html');
+              const anchors = Array.from(doc.querySelectorAll('a[href]'));
+              for (const a of anchors) {
+                const href = a.getAttribute('href') || '';
+                if (href) candidates.push(href);
+              }
+            }
+
+            const harvested: string[] = [];
+            for (const href of candidates) {
+              // Discard mailto:, tel:, javascript:, and pure-fragment hrefs
+              const lower = href.toLowerCase();
+              if (lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('javascript:')) continue;
+              if (href === '#' || href.startsWith('#')) continue;
+
+              let u: URL;
+              try {
+                u = new URL(href, `https://${rootHost}`);
+              } catch {
+                continue;
+              }
+
+              // Keep only same-host URLs (strip www. from both sides before comparing)
+              if (stripWww(u.hostname) !== stripWww(rootHost)) continue;
+
+              // Strip fragment, keep query string
+              u.hash = '';
+              harvested.push(u.href);
+            }
+
+            return harvested;
+          };
+
+          if (baseLinks.length <= 2) {
+            if (abortControllerRef.current?.signal.aborted) {
+              throw new Error('Operation cancelled by user');
+            }
+
+            setLoadingMessage('Extracting links from homepage HTML...');
+            const harvested = await harvestFromUrl(`https://${rootHost}`);
+
+            if (harvested.length > 0) {
+              const beforeCount = baseLinks.length;
+              baseLinks = Array.from(new Set([...baseLinks, ...harvested]));
+              console.log(`HTML link harvest added ${harvested.length} URLs, total: ${baseLinks.length}`);
+
+              // Second-level pass: if still few URLs, scrape newly discovered pages
+              if (baseLinks.length <= 5) {
+                if (abortControllerRef.current?.signal.aborted) {
+                  throw new Error('Operation cancelled by user');
+                }
+
+                const newlyFound = baseLinks.slice(beforeCount).slice(0, 5);
+                if (newlyFound.length > 0) {
+                  setLoadingMessage('Extracting links from discovered pages (second pass)...');
+                  const secondLevelResults = await Promise.all(
+                    newlyFound.map((pageUrl) => harvestFromUrl(pageUrl))
+                  );
+
+                  const secondHarvested: string[] = [];
+                  for (const links of secondLevelResults) {
+                    secondHarvested.push(...links);
+                  }
+
+                  if (secondHarvested.length > 0) {
+                    baseLinks = Array.from(new Set([...baseLinks, ...secondHarvested]));
+                    console.log(`HTML link harvest (second pass) added ${secondHarvested.length} URLs, total: ${baseLinks.length}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          if (err?.message === 'Operation cancelled by user') throw err;
+          // best-effort supplement — log and continue silently
+          console.error('HTML link harvest failed:', err);
+        }
+
         // Filter to path prefix if user entered a sub-path (e.g. example.com/blog)
         if (pathPrefix) {
           const prefixFilter = `https://${rootHost}${pathPrefix}`;
