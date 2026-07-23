@@ -2,6 +2,10 @@ export const DESIGN_SYSTEM_PROMPT = `You are a precision design system analyst. 
 1. Raw HTML including <style> tags and inline styles from the target website
 2. A full-page screenshot of the rendered website
 
+CSS arrives from two sources: external stylesheets fetched directly from the site, and inline <style> blocks and style= attributes. Both are equally authoritative. External stylesheet custom properties are usually the real design system — on Elementor sites look for .elementor-kit-* blocks, and on WordPress themes look for theme :root blocks. Continue ignoring all --wp--preset--* values as platform boilerplate.
+
+Resolve every var(--x) chain to a final hex or px value, following references across BOTH external and inline sources. A variable defined in an external stylesheet and consumed inline must still be resolved.
+
 Your task: Generate a complete, production-ready design.md file.
 
 ## RULE 0 — ABSOLUTE PROHIBITION ON FABRICATION
@@ -302,7 +306,13 @@ padding: [value];
 
 export const BLUEPRINT_SYSTEM_PROMPT = `You are a precise web page structure analyst. Extract every section and global element from the provided HTML and return a structured JSON blueprint.
 
-You are given the design.md generated from this same page. Use its resolved color tokens to populate each section's background_color and text_color with real hex values instead of null. If a section's background cannot be determined from design.md or the screenshot, use null — do not guess.
+RULE 0 — NO FABRICATED VALUES. Never read hex color values off the screenshot. Screenshot pixels are compressed, colour-shifted, and often overlaid — a value sampled from them is a guess presented as a measurement. background_color and text_color may ONLY be populated from a hex value present in the supplied design.md or CSS. If design.md reports a value as NOT FOUND, the corresponding blueprint field MUST be null. Null is the correct answer. A plausible-looking hex that was never in the CSS is a defect.
+
+Use the screenshot to determine STRUCTURE and RELATIVE properties only: how many sections exist, their order, layout, which are visually dark versus light, where images sit, how many columns. Never to determine exact values.
+
+If design.md reports a token as NOT FOUND, you must not supply a value for that same token anywhere in the blueprint. The two documents describe the same page and must never contradict each other.
+
+You are given the design.md generated from this same page. Use its resolved color tokens to populate each section's background_color and text_color with real hex values instead of null. If a section's background cannot be determined from design.md or the CSS, use null — do not guess.
 
 You are also given a full-page screenshot of the rendered page. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete. Treat the segments as one continuous page — do not report a section twice because it appears in the overlap region, and do not assume content is missing from the page merely because it is absent from the segments.
 
@@ -367,6 +377,7 @@ Return ONLY valid JSON with this exact structure:
         "do_not_do": ["list of layout mistakes to avoid in this section"]
       },
       "background_color": "hex or transparent or null",
+      "background_tone": "dark|light|mid|null",
       "text_color": "hex or null",
       "estimated_height_desktop": "viewport units or px estimate e.g. '100vh' or '400px'"
     }
@@ -379,24 +390,17 @@ Return ONLY valid JSON with this exact structure:
 - layout_contract must have all 12 fields filled — never leave null unless the field genuinely does not apply
 - must_preserve and allowed_simplifications and do_not_do must each have at least 1 item
 - Extract actual text content for headline/subheadline/body_text when visible
+- background_tone is populated from the screenshot when the exact hex is unknown — it captures what the screenshot legitimately shows (dark/light/mid) without inventing precision
 - Return ONLY the JSON object, no markdown fences, no explanation`;
 
-export function buildDesignUserPrompt(
-  cssBlocks: string[],
-  inlineStyles: string[]
-): string {
-  const noCssBlocks = cssBlocks.length === 0 || cssBlocks.every(b => !b.trim());
-  const noInlineStyles = inlineStyles.length === 0;
+export function buildDesignUserPrompt(combinedCss: string): string {
+  const hasCss = combinedCss.trim().length > 0;
 
-  return `Here are the CSS blocks extracted from the page${noCssBlocks ? ' (NONE FOUND — no <style> blocks were returned)' : ''}:
+  return `Here is the CSS extracted from the page (external stylesheets, inline <style> blocks, and style= attributes)${hasCss ? '' : ' (NONE FOUND — no CSS was retrieved from any source)'}:
 
 \`\`\`css
-${noCssBlocks ? '/* No CSS blocks returned */' : cssBlocks.join('\n\n/* --- next style block --- */\n\n')}
+${hasCss ? combinedCss : '/* No CSS returned from any source */'}
 \`\`\`
-
-Sample inline styles found${noInlineStyles ? ' (NONE FOUND)' : ''}:
-
-${noInlineStyles ? '(no inline styles returned)' : inlineStyles.slice(0, 50).join('\n')}
 
 Generate the complete design.md file. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }

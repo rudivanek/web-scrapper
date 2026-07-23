@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.14 | Last Updated: 2026-07-23T15:00:00Z -->
+<!-- Version: 1.15 | Last Updated: 2026-07-23T16:00:00Z -->
 
 ---
 
@@ -1135,16 +1135,16 @@ A new "Design Extract" tab in the main Scrape panel runs a production-grade two-
 
 ### Pipeline Overview
 
-**Updated:** 2026-07-23 — Removed the Firecrawl `extract` format entirely; added screenshot-to-Claude vision; chained design.md into the blueprint call.
+**Updated:** 2026-07-23 — Removed the Firecrawl `extract` format entirely; added screenshot-to-Claude vision; chained design.md into the blueprint call. Added external stylesheet fetching via `extract-css` edge function. Added Rule 0 to BLUEPRINT_SYSTEM_PROMPT.
 
-The pipeline is now split into three sequential phases:
+The pipeline is now split into four sequential phases:
 
 **Phase 1 — Structure scrape (Firecrawl rawHtml + screenshot)**
 Calls `POST /v1/scrape` with formats `rawHtml` and `screenshot@fullPage`, with `onlyMainContent: false`. Returns the full page HTML and a full-page screenshot. This scrape runs BEFORE any LLM call so the screenshot is available to both Claude calls.
 
 > **Why the `extract` format was removed (2026-07-23):** Firecrawl's LLM-powered `extract` returned fabricated values. For an Elementor site using Manrope, #000000, and #0055ff, it returned the Bootstrap 4 default palette (#007BFF / #343A40 / #212529 / #FFC107) and a Roboto Google Fonts URL. Every value was wrong. All of this data is already available deterministically in the CSS blocks and inline styles extracted by `htmlPreprocess.ts`, so the `extract` call was a fabrication surface with no upside.
 
-**Phase 2 — HTML Pre-processing (client-side, before any LLM call)**
+**Phase 2 — HTML Pre-processing + External CSS fetch (client-side, before any LLM call)**
 Runs a five-step cleaning pipeline (`src/lib/htmlPreprocess.ts`):
 1. Detect and preserve font CDN URLs from `fonts.googleapis.com`, `fonts.bunny.net`, and `use.typekit.net`. Inject a comment at the top of the HTML listing all detected font URLs. Replace `<link>` tags pointing to these CDNs with `__FONT_LINK_N__` placeholders.
 2. Strip noise: all `<script>` blocks, all `<style>` blocks (CSS content extracted separately before removal), all HTML comments, all `class=` attributes, all `data-*` attributes, all `aria-*` attributes, all `id=` attributes (except anchor-containing ones). Collapse multiple whitespace.
@@ -1152,8 +1152,22 @@ Runs a five-step cleaning pipeline (`src/lib/htmlPreprocess.ts`):
 4. Extract CSS separately: up to 5 `<style>` block contents and up to 50 `style=""` inline attribute values.
 5. Truncate: if cleaned HTML exceeds 80,000 chars, keep first 60,000 + last 20,000, joined with a truncation comment.
 
+Then calls `extractCssData(normalized)` which hits the `extract-css` edge function to fetch and parse external stylesheets. The result (`CssExtractResult`) contains `customProperties`, `fonts`, `colors`, `mediaQueries`, `keyframes`, `sheets`, and `rawCss`. On null or throw, the call logs and continues — this is a supplement, never fatal.
+
+The external CSS data is merged with the inline CSS from `htmlPreprocess` into a combined CSS context string in this priority order:
+1. `customProperties` — formatted as `selector { --name: value; }` (never truncated)
+2. `fonts` — formatted as `selector { property: value; }`
+3. `colors` — formatted as `selector { property: value; }`
+4. `mediaQueries` — raw text
+5. Inline `<style>` blocks from `htmlPreprocess`
+6. Inline `style=` attributes from `htmlPreprocess`
+
+Identical declarations are deduplicated. Each group is labeled with a comment header (e.g. `/* ─── External stylesheet custom properties ─── */`) so the model can tell sources apart. The combined CSS is capped at 120,000 characters — groups are kept in priority order and the lowest-priority group that overflows is truncated. `customProperties` is never truncated. A comment noting truncation is appended.
+
+If zero external sheets were retrieved, an amber notice appears in the UI: 'No se pudieron descargar hojas de estilo externas — el análisis se basó solo en los estilos incrustados.'
+
 **Phase 3 — LLM Call A: Generate design.md (Claude claude-sonnet-4-6, with screenshot)**
-Sends up to 5 CSS blocks, up to 50 inline style samples, AND the full-page screenshot (as base64 image) to Claude with the `DESIGN_SYSTEM_PROMPT`. The screenshot is used to VERIFY and DISAMBIGUATE — never to invent. Specifically:
+Sends the combined CSS context string (external + inline) AND the full-page screenshot (as base64 image segments) to Claude with the `DESIGN_SYSTEM_PROMPT`. The prompt now notes that CSS arrives from two sources (external stylesheets and inline), both equally authoritative, and instructs resolving `var(--x)` chains across BOTH sources. The screenshot is used to VERIFY and DISAMBIGUATE — never to invent. Specifically:
 - When multiple CSS rules could apply, the screenshot decides which renders
 - Confirm which sections are dark vs light vs off-white
 - Confirm the real visual hierarchy of H1 vs H2 vs H3 (relative size and weight)
@@ -1182,15 +1196,17 @@ Additional blueprint rules added:
 
 The output is a structured JSON object containing:
 - `globals`: navigation (type, logo, links, CTA, background) and footer (columns, logo, social, newsletter, background)
-- `sections[]`: one entry per page section in order, each with: `section_index`, `section_name`, `section_type` (enum), `headline`, `subheadline`, `body_text`, `cta_buttons`, `media`, `background_color`, `text_color`, `estimated_height_desktop`
+- `sections[]`: one entry per page section in order, each with: `section_index`, `section_name`, `section_type` (enum), `headline`, `subheadline`, `body_text`, `cta_buttons`, `media`, `background_color`, `background_tone`, `text_color`, `estimated_height_desktop`
 - `layout_contract` per section: a 12-field structural intelligence object with `section_role`, `desktop_layout`, `mobile_layout`, `column_structure`, `content_position`, `image_position`, `card_or_grid_structure`, `alignment_rules`, `spacing_density`, `must_preserve`, `allowed_simplifications`, and `do_not_do`
 
 ### UI
 
 The extraction UI shows:
 - URL input and "Extract Design" button (triggers API key modal if no key is stored)
-- A live progress bar with per-phase status indicators (pending / active spinner / done checkmark)
+- A live progress bar with per-phase status indicators (pending / active spinner / done checkmark) — now 4 phases: scrape, fetch-css, design.md, blueprint
 - On completion: full-page screenshot preview, and two output panels (`design.md` and Blueprint JSON) each with Copy and Download buttons
+- Amber notice if no external sheets were retrieved: 'No se pudieron descargar hojas de estilo externas — el análisis se basó solo en los estilos incrustados.'
+- Amber notice if screenshot was unavailable: 'Verificación visual no disponible — el análisis se basó únicamente en el CSS.'
 - A "Download Both Files" button that triggers sequential downloads of both output files
 
 > Note: The collapsible Firecrawl extract JSON panel was removed when the `extract` format was dropped (2026-07-23).
@@ -1203,13 +1219,15 @@ The extraction UI shows:
 | `src/lib/imagePrep.ts` | Screenshot preparation — scales to 1400px width, slices tall screenshots into ≤1600px segments with 100px overlap, max 4 segments, hard validation |
 | `src/lib/prompts/designExtractionPrompts.ts` | System prompts and user message builders for both LLM calls |
 | `src/lib/callClaude.ts` | Claude API wrapper — accepts `images?: string[]` param; retries without images on 400 image errors |
+| `src/lib/firecrawl.ts` | `extractCssData()` — calls the `extract-css` edge function to fetch external stylesheets |
 
 ### Design Decisions
 
 - **Single Firecrawl scrape call** (updated 2026-07-23): The previous two-call design (extract + screenshot) was collapsed into one call with `rawHtml` + `screenshot@fullPage`. The `extract` format was removed because Firecrawl's LLM extract fabricated values (Bootstrap defaults, wrong fonts) that were already available deterministically in the CSS.
+- **External stylesheet fetching** (added 2026-07-23): `preprocessHtml()` only reads inline `<style>` tags and `style=` attributes — sites serving CSS from external files (Elementor's default "External File" CSS Print Method, most WordPress themes) yielded almost no extractable tokens. The `extract-css` edge function (already deployed but never called) is now invoked via `extractCssData()` between the structure scrape and the design LLM call. The result is merged into a combined CSS context string in priority order (custom properties first, never truncated), deduplicated, capped at 120k characters. On failure, the call logs and continues — it is a supplement, never fatal.
 - **Screenshot sent to Claude vision**: The full-page screenshot is prepared by `src/lib/imagePrep.ts` (`prepareScreenshot()`) which scales to a 1400px working width, then slices tall pages into segments of at most 1600px each with a 100px overlap (capped at 4 segments — above-the-fold, two middle samples, footer). Each segment is validated against Anthropic's 8000px dimension limit and 5MB base64 size limit. `src/lib/callClaude.ts` accepts an optional `images?: string[]` parameter and builds a multimodal content array (images first, text last). If the API returns a 400 mentioning 'image', the call is retried once without images — a CSS-only design.md is a valid result. The original unsliced screenshot is kept for the on-screen preview; only the Claude payload uses segments. If `prepareScreenshot` returns an empty array, both LLM calls proceed without images and an amber notice is shown: 'Verificación visual no disponible — el análisis se basó únicamente en el CSS.'
 - **design.md chained into blueprint call**: The design.md generated by Call A is passed as context to Call B so the blueprint can use resolved color tokens for `background_color` and `text_color` instead of null.
-- **Rule 0 — no fabrication**: The design prompt now has an absolute prohibition on inventing values. Type scale inference (H1=48px etc.) and semantic color defaults were deleted. The `:root` block is sanitized to valid CSS — unresolved tokens are commented out.
+- **Rule 0 — no fabrication**: Both prompts now have an absolute prohibition on inventing values. In DESIGN_SYSTEM_PROMPT, type scale inference (H1=48px etc.) and semantic color defaults were deleted. In BLUEPRINT_SYSTEM_PROMPT, Rule 0 was added to prevent reading hex values off the screenshot — `background_color` and `text_color` may only come from design.md or CSS, and if design.md reports NOT FOUND the blueprint field must be null. A new `background_tone` field captures dark/light/mid from the screenshot without inventing precision. A consistency requirement ensures the blueprint never contradicts design.md. The `:root` block is sanitized to valid CSS — unresolved tokens are commented out.
 - **HTML pre-processing before LLM** is critical: strips ~60–80% of token-wasting noise while preserving the font CDN links that would otherwise be lost with the `<link>` tags.
 - **Font CDN placeholder trick** preserves font loading URLs through the stripping step without requiring a separate font-detection pass.
 - **Head + tail truncation** (not middle truncation) preserves the `<head>` (font links, meta) and the end of `<body>` (footer) which are typically the most information-dense regions for design extraction.

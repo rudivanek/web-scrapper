@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
-import { callFirecrawl } from '../lib/firecrawl';
+import { callFirecrawl, extractCssData, type CssExtractResult } from '../lib/firecrawl';
 import { callClaude } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
@@ -15,7 +15,7 @@ import { ApiKeyModal } from './ApiKeyModal';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface ExtractionState {
-  phase: 'idle' | 'scrape-design' | 'scrape-structure' | 'llm-design' | 'llm-blueprint' | 'done' | 'error';
+  phase: 'idle' | 'scrape-design' | 'scrape-structure' | 'fetch-css' | 'llm-design' | 'llm-blueprint' | 'done' | 'error';
   message: string;
   progress: number; // 0–100
 }
@@ -25,6 +25,7 @@ interface ExtractionResult {
   blueprintJson: string;
   screenshot: string | null;
   screenshotAvailable: boolean;
+  externalSheets: number;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -42,6 +43,81 @@ function downloadFile(content: string, filename: string, mime: string) {
 function hostname(url: string): string {
   try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, ''); }
   catch { return url; }
+}
+
+const MAX_COMBINED_CSS = 120000;
+
+function buildCombinedCss(
+  cssData: CssExtractResult | null,
+  cssBlocks: string[],
+  inlineStyles: string[]
+): string {
+  const seen = new Set<string>();
+  const dedupe = (lines: string[]): string[] =>
+    lines.filter(l => { if (seen.has(l)) return false; seen.add(l); return true; });
+
+  const groups: Array<{ header: string; lines: string[]; canTruncate: boolean }> = [];
+
+  if (cssData) {
+    groups.push({
+      header: 'External stylesheet custom properties',
+      lines: dedupe(cssData.customProperties.map(p => `${p.selector} { ${p.name}: ${p.value}; }`)),
+      canTruncate: false,
+    });
+    groups.push({
+      header: 'External stylesheet font declarations',
+      lines: dedupe(cssData.fonts.map(f => `${f.selector} { ${f.property}: ${f.value}; }`)),
+      canTruncate: true,
+    });
+    groups.push({
+      header: 'External stylesheet color values',
+      lines: dedupe(cssData.colors.map(c => `${c.selector} { ${c.property}: ${c.value}; }`)),
+      canTruncate: true,
+    });
+    groups.push({
+      header: 'External stylesheet media queries',
+      lines: dedupe(cssData.mediaQueries.map(m => m.raw)),
+      canTruncate: true,
+    });
+  }
+
+  groups.push({ header: 'Inline <style> blocks', lines: dedupe(cssBlocks), canTruncate: true });
+  groups.push({ header: 'Inline style= attributes', lines: dedupe(inlineStyles), canTruncate: true });
+
+  const parts: string[] = [];
+  let length = 0;
+  let truncated = false;
+
+  for (const group of groups) {
+    if (group.lines.length === 0) continue;
+    const header = `/* ─── ${group.header} ─── */`;
+    const groupText = [header, ...group.lines].join('\n');
+    const overhead = 2;
+
+    if (!group.canTruncate) {
+      parts.push(groupText);
+      length += groupText.length + overhead;
+      continue;
+    }
+
+    if (length + groupText.length + overhead <= MAX_COMBINED_CSS) {
+      parts.push(groupText);
+      length += groupText.length + overhead;
+    } else {
+      const remaining = MAX_COMBINED_CSS - length - overhead;
+      if (remaining > 100) {
+        parts.push(groupText.slice(0, remaining) + '\n/* ... truncated ... */');
+      }
+      truncated = true;
+      break;
+    }
+  }
+
+  if (truncated) {
+    parts.push('/* ─── Additional CSS groups truncated to fit 120k character limit ─── */');
+  }
+
+  return parts.join('\n\n');
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -159,18 +235,29 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Phase 2: Pre-process HTML
       const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
 
+      // Phase 3: Fetch external stylesheets
+      setPhase('fetch-css', 'Descargando hojas de estilo externas...', 25);
+      let cssData: CssExtractResult | null = null;
+      try {
+        cssData = await extractCssData(normalized);
+      } catch (e) {
+        console.warn('extractCssData failed, continuing with inline CSS only:', e);
+      }
+      const externalSheets = cssData?.sheets?.length ?? 0;
+      const combinedCss = buildCombinedCss(cssData, cssBlocks, inlineStyles);
+
       // Prepare screenshot segments for Claude vision
       let screenshotSegments: string[] = [];
       if (screenshot) {
         screenshotSegments = await prepareScreenshot(screenshot);
       }
 
-      // Phase 3: LLM Call A — design.md (with screenshot segments)
-      setPhase('llm-design', 'Generating design.md with Claude...', 35);
-      const designUserPrompt = buildDesignUserPrompt(cssBlocks, inlineStyles);
+      // Phase 4: LLM Call A — design.md (with screenshot segments)
+      setPhase('llm-design', 'Generating design.md with Claude...', 45);
+      const designUserPrompt = buildDesignUserPrompt(combinedCss);
       const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
-      // Phase 4: LLM Call B — blueprint JSON (with screenshot segments + design.md as context)
+      // Phase 5: LLM Call B — blueprint JSON (with screenshot segments + design.md as context)
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 70);
       const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd);
       const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
@@ -186,7 +273,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0 });
+      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -209,13 +296,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
     runExtraction(key);
   };
 
-  const isRunning = ['scrape-design', 'scrape-structure', 'llm-design', 'llm-blueprint'].includes(state.phase);
+  const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint'].includes(state.phase);
   const site = hostname(url);
 
   const phases: Array<{ key: ExtractionState['phase']; label: string }> = [
     { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
-    { key: 'llm-design', label: 'Phase 2 — Generate design.md (Claude)' },
-    { key: 'llm-blueprint', label: 'Phase 3 — Generate blueprint JSON (Claude)' },
+    { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
+    { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
+    { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON (Claude)' },
   ];
 
   const currentPhaseIdx = phases.findIndex(p => p.key === state.phase);
@@ -321,6 +409,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>Verificación visual no disponible — el análisis se basó únicamente en el CSS.</span>
+            </div>
+          )}
+
+          {/* No external sheets notice */}
+          {result.externalSheets === 0 && (
+            <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>No se pudieron descargar hojas de estilo externas — el análisis se basó solo en los estilos incrustados.</span>
             </div>
           )}
 
