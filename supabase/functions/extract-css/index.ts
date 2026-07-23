@@ -351,12 +351,17 @@ Deno.serve(async (req: Request) => {
           sheetsFailed.push({ url: cssUrl, reason: `http-${cssRes.status}` });
           return;
         }
-        const contentType = cssRes.headers.get("content-type") ?? "";
-        if (!contentType.includes("css")) {
+        const contentType = (cssRes.headers.get("content-type") ?? "").toLowerCase();
+        const css = await cssRes.text();
+        const looksLikeHtml = /^\s*(<!doctype|<html|<head|<body)/i.test(css);
+        if (contentType.includes("html") || looksLikeHtml) {
           sheetsFailed.push({ url: cssUrl, reason: "html-response (likely WAF block)" });
           return;
         }
-        const css = await cssRes.text();
+        if (!contentType.includes("css") && css.trim().length === 0) {
+          sheetsFailed.push({ url: cssUrl, reason: "empty-response" });
+          return;
+        }
         sheetsFetchedOk++;
         sheets.push({ url: cssUrl, size: css.length, isInline: false });
         rawCss[cssUrl] = css.length > 100_000 ? css.slice(0, 100_000) + "\n/* truncated */" : css;
@@ -383,12 +388,17 @@ Deno.serve(async (req: Request) => {
               sheetsFailed.push({ url: importUrl, reason: `http-${impRes.status}` });
               return;
             }
-            const impContentType = impRes.headers.get("content-type") ?? "";
-            if (!impContentType.includes("css")) {
+            const impContentType = (impRes.headers.get("content-type") ?? "").toLowerCase();
+            const impCss = await impRes.text();
+            const impLooksLikeHtml = /^\s*(<!doctype|<html|<head|<body)/i.test(impCss);
+            if (impContentType.includes("html") || impLooksLikeHtml) {
+              sheetsFailed.push({ url: importUrl, reason: "html-response (likely WAF block)" });
+              return;
+            }
+            if (!impContentType.includes("css") && impCss.trim().length === 0) {
               sheetsFailed.push({ url: importUrl, reason: "non-css content-type" });
               return;
             }
-            const impCss = await impRes.text();
             sheetsFetchedOk++;
             sheets.push({ url: importUrl, size: impCss.length, isInline: false });
             rawCss[importUrl] = impCss.length > 50_000 ? impCss.slice(0, 50_000) + "\n/* truncated */" : impCss;
