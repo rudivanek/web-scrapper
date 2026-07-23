@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.10 | Last Updated: 2026-07-23T00:00:00Z -->
+<!-- Version: 1.11 | Last Updated: 2026-07-23T12:00:00Z -->
 
 ---
 
@@ -830,61 +830,129 @@ Crawling a site with a blog section (e.g. `sharpen.studio/blog/`) now returns al
 
 ---
 
-## Website Crawler — HTML Link-Harvest Fallback
+## Website Crawler — Four-Tier Discovery Architecture
 
-**Added:** 2026-07-23
+**Added:** 2026-07-23 (refactored from single-tier map+sitemap)
 **Component:** `src/components/Crawler.tsx` — `handleCrawl()`
-**Firecrawl Endpoint:** `/v1/scrape` (via `firecrawl-proxy` edge function)
+**Firecrawl Endpoints:** `/v1/map`, `/v1/scrape`, `/v1/crawl` (all via `firecrawl-proxy` edge function)
 
 ### Problem
 
-In standard crawl mode, URL discovery relied on two sources: Firecrawl `/v1/map` plus sitemap.xml candidates fetched directly. Sites with no published sitemap (e.g. Webflow sites with auto-sitemap disabled) returned only the homepage from `/v1/map`, even when the homepage HTML contained normal `<a href>` navigation links to other pages on the same site.
+The original crawler used a single discovery path: Firecrawl `/v1/map` plus a sitemap.xml supplement. This failed on three common site types:
+1. **No sitemap** (e.g. Webflow with auto-sitemap off) — `/v1/map` returned only the homepage.
+2. **Incomplete sitemap** — sitemap listed some pages but missed others that were linked from the site's own navigation.
+3. **JavaScript-rendered navigation** — neither `/v1/map` nor sitemap contained any links because the nav was client-rendered.
 
-### Solution
+### Solution: Four-Tier Escalation
 
-A third discovery source — an HTML link-harvest fallback — was added to `handleCrawl()`. It is inserted in the crawl flow **after** the sitemap supplement block and **before** the `pathPrefix` filter, so all existing downstream filtering (NON_PAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, pathPrefix, pagesOnly) runs unchanged on the merged URL set.
+Discovery now runs in four tiers, cheapest first. Each tier escalates only when the previous one underperforms, so sites with a good sitemap pay nothing extra.
 
-### Trigger Condition
+#### Refactor (Part A)
 
-The harvest block runs only when `baseLinks.length <= 2` after the map + sitemap steps have completed. If map/sitemap already produced a healthy list of URLs, the harvest is skipped entirely.
+The two existing discovery paths were extracted into reusable async functions inside the component:
 
-### First-Level Harvest (Homepage)
+- **`discoverViaMap(rootHost, maxUrls)`** → `string[]` — calls `/v1/map`, polls for async job completion if needed, returns the link list. Token tracking is unchanged.
+- **`discoverViaCrawl(rootHost, maxUrls)`** → `string[]` — calls `/v1/crawl`, polls via `pollCrawlJob()` until the job completes, returns discovered URLs. Token tracking is unchanged.
 
-1. The loading message is set to `Extracting links from homepage HTML...`.
-2. The existing `firecrawl-proxy` edge function is called with:
-   - `endpoint: '/v1/scrape'`
-   - `body: { url: 'https://${rootHost}', formats: ['html', 'rawHtml', 'links'] }`
-3. Candidate URLs are collected from two sources:
-   - **(a)** `scrapeData.data.links` — if it is an array, each entry is read as a string or as an object's `.url` field.
-   - **(b)** `scrapeData.data.html || scrapeData.data.rawHtml` — parsed with `DOMParser`, and every `a[href]` element's `href` attribute is collected.
-4. Each candidate is normalized with `new URL(href, 'https://${rootHost}').href` inside a try/catch — anything that throws is skipped.
-5. Filtering rules:
-   - Keep only URLs whose hostname equals `rootHost` (a leading `www.` is stripped from both sides before comparing).
-   - Discard `mailto:`, `tel:`, `javascript:` hrefs.
-   - Discard any href that is exactly `#` or starts with `#`.
-   - Strip URL fragments (`u.hash = ''`) before adding. Query strings are preserved.
-6. Harvested URLs are merged into `baseLinks` via `new Set([...baseLinks, ...harvested])` and a console log is emitted: `HTML link harvest added ${harvested.length} URLs, total: ${baseLinks.length}`.
+The `if (jsSpa) { ... } else { ... }` branch was replaced:
+- **jsSpa toggle ON** → calls `discoverViaCrawl` directly, skipping tiers 1–3. Sets `discoveryMethod = 'deep-crawl'`. The manual override always wins.
+- **jsSpa toggle OFF** → runs tiers 1–3 in order.
 
-### Second-Level Harvest (Interior Pages)
+New state variables:
+- `discoveryMethod: 'map' | 'html-harvest' | 'deep-crawl' | null` — which tier produced the final URL list.
+- `sitemapGap: { claimed: number; found: number; missing: string[] } | null` — pages found on the site but not in the sitemap.
 
-After the first-level merge, if `baseLinks.length` is still `<= 5`, a second-level pass runs:
+New shared helper at module scope:
+- **`normalizeLinks(hrefs, baseUrl, rootHost)`** → `string[]` — resolves each href via `new URL(href, baseUrl)`, discards `mailto:`/`tel:`/`javascript:` and pure-fragment hrefs, keeps only same-host URLs (stripping `www.` from both sides), strips fragments, preserves query strings. Used by Tier 2 and the Reconciliation pass.
 
-- Up to 5 newly harvested URLs (those added by the first pass, not the original map results) are scraped in parallel via `Promise.all`, each using the same `/v1/scrape` call and harvesting logic described above.
-- All second-level harvested URLs are merged into `baseLinks` via `new Set(...)`.
-- A console log is emitted: `HTML link harvest (second pass) added ${secondHarvested.length} URLs, total: ${baseLinks.length}`.
-- The pass does **not** recurse beyond this second level.
+#### Tier 1: Map + Sitemap (Part B)
 
-### Abort Handling
+1. Calls `discoverViaMap(rootHost, maxUrls)`.
+2. Runs the existing sitemap supplement block unchanged: fetches `sitemap.xml`, `sitemap_index.xml`, `sitemap-index.xml`, `blog-sitemap.xml`, `post-sitemap.xml`, `page-sitemap.xml`, plus any `Sitemap:` directives from `robots.txt`. Follows sitemap index references recursively. Merges results into `baseLinks`.
+3. Records `const claimedCount = baseLinks.length` — the baseline for sitemap-gap detection.
+4. Sets `discoveryMethod = 'map'`.
 
-`abortControllerRef.current?.signal.aborted` is checked before the first-level harvest and before the second-level pass. If the user has cancelled the crawl, the block throws `Operation cancelled by user`, which propagates up and aborts the crawl as usual.
+#### Tier 2: HTML Link Harvest (Part C)
 
-### Error Handling
+Runs only when `baseLinks.length <= 2` after Tier 1. Otherwise skipped entirely.
 
-The entire harvest block is wrapped in a try/catch. The only error that re-throws is `Operation cancelled by user`. Any other failure (network error, parse error, unexpected response shape) is logged via `console.error('HTML link harvest failed:', err)` and the crawl continues silently — this is a best-effort supplement and must never abort the crawl.
+**First-level harvest (homepage):**
+1. Loading message: `Extracting links from homepage HTML...`
+2. Calls `/v1/scrape` with `formats: ['html', 'rawHtml', 'links']` on `https://${rootHost}`.
+3. Collects candidate URLs from both `scrapeData.data.links` (array of strings or objects with `.url`) and by parsing `html || rawHtml` with `DOMParser` for all `a[href]` elements.
+4. Passes candidates through `normalizeLinks(candidates, 'https://${rootHost}', rootHost)`.
+5. Merges into `baseLinks` via `new Set(...)`. Logs: `HTML link harvest added ${harvested.length} URLs, total: ${baseLinks.length}`.
+6. Sets `discoveryMethod = 'html-harvest'` if any URLs were added.
 
-### Token Tracking
+**Second-level harvest (interior pages):**
+- If `baseLinks.length` is still `<= 5` after the first pass, up to 5 newly discovered URLs are scraped in parallel via `Promise.all` using the same harvest logic.
+- Results merged via `new Set(...)`. Logs: `HTML link harvest (second pass) added ${secondHarvested.length} URLs, total: ${baseLinks.length}`.
+- Does not recurse beyond this second level.
 
-For every `/v1/scrape` call made in this block, `tokensUsed` is incremented by `scrapeData.creditsUsed` (or `1` if `creditsUsed` is absent). The increment uses the same `setTokensUsed` + `updateTokensInDatabase` pattern already used elsewhere in `handleCrawl()`.
+**Abort handling:** `abortControllerRef.current?.signal.aborted` is checked before the first-level harvest and before the second-level pass. If aborted, throws `Operation cancelled by user`.
+
+**Error handling:** The entire tier is wrapped in try/catch. Only `Operation cancelled by user` re-throws. All other failures are logged via `console.error('HTML link harvest failed:', err)` and the crawl continues silently.
+
+**Token tracking:** Every `/v1/scrape` call increments `tokensUsed` by `scrapeData.creditsUsed` (or `1` if absent) using the existing `setTokensUsed` + `updateTokensInDatabase` pattern.
+
+#### Tier 3: Auto-Escalate to Deep Crawl (Part D)
+
+Runs only when `baseLinks.length <= 2` after Tier 2 completes — the signature of a JS-rendered site with no crawlable HTML links.
+
+1. Checks `abortControllerRef.current?.signal.aborted`; throws if set.
+2. Loading message: `Few pages found — switching to deep crawl (this may take a few minutes)...`
+3. Calls `discoverViaCrawl(rootHost, maxUrls)`.
+4. Merges: `baseLinks = Array.from(new Set([...baseLinks, ...crawlLinks]))`. Logs: `Auto-escalated to /v1/crawl, total URLs: ${baseLinks.length}`.
+5. Sets `discoveryMethod = 'deep-crawl'`.
+6. Escalates **at most once** per crawl. Never escalates when the jsSpa toggle is on (that path already uses deep crawl).
+7. Wrapped in try/catch — on failure, logs and continues with whatever `baseLinks` holds.
+
+#### Reconciliation Pass (Part E)
+
+Runs during and after the existing `includeMeta` batch scrape loop. **Skipped entirely when `includeMeta` is OFF** — no page HTML is downloaded in that mode, so there is nothing to harvest.
+
+**During the batch scrape:**
+1. The `formats` array for each page scrape is extended from `['markdown', 'html', 'rawHtml']` to `['markdown', 'html', 'rawHtml', 'links']`. This costs no additional credits — the page is already being scraped.
+2. For each scraped page, same-host URLs are extracted from both `scrapeData.data.links` and by parsing `html || rawHtml` for `a[href]`. These are passed through `normalizeLinks(candidates, pageUrl, rootHost)` using that page's URL as `baseUrl`.
+3. All extracted URLs are accumulated into a `Set<string>` called `observedUrls`.
+
+**After the batch loop:**
+4. Computes `missing = [...observedUrls].filter(u => !urlList.includes(u))`.
+5. Applies the same `NON_PAGE_EXTENSIONS` / `DOCUMENT_EXTENSIONS` / `pathPrefix` / `pagesOnly` filters to `missing` that were applied to `urlList`.
+6. If `missing.length > 0` and `detailedResults.length < maxUrls`:
+   - Loading message: `Found ${missing.length} pages not listed in the sitemap — scraping...`
+   - Scrapes the missing pages using the same batch logic, capped at the remaining `maxUrls` budget.
+   - Appends results to `detailedResults`.
+   - Re-runs steps 4–6 on the newly scraped pages, **maximum 2 additional rounds total**. Hard stop after that.
+7. Populates `sitemapGap`: `{ claimed: claimedCount, found: detailedResults.length, missing: accumulated missing URLs across all rounds }`.
+8. `abortControllerRef` is checked between rounds. The entire reconciliation is wrapped in try/catch — on failure, logs and keeps results already gathered.
+
+### User Feedback (Part F)
+
+**Discovery method label** — shown as small muted text above the results table:
+
+| `discoveryMethod` | Label (ES) |
+|---|---|
+| `map` | Páginas encontradas vía sitemap |
+| `html-harvest` | Sitio sin sitemap — páginas encontradas analizando los enlaces del sitio |
+| `deep-crawl` | Sitio dinámico detectado — se usó rastreo profundo |
+
+**Sitemap gap warning** — if `sitemapGap && sitemapGap.missing.length > 0`, an amber warning block appears above the results table:
+
+> El mapa del sitio no incluye N página(s) que sí existen en el sitio. Esto puede impedir que Google las encuentre.
+
+The missing URLs are listed beneath the warning in a scrollable container.
+
+**Data exposure:** Both `discoveryMethod` and `sitemapGap` are stored in component state and are available for the SEO audit module to consume as findings. The SEO module is not modified in this change — only the data is made available.
+
+### What Did Not Change (Part G)
+
+- `NON_PAGE_EXTENSIONS` and `DOCUMENT_EXTENSIONS` regex definitions and filtering
+- The `pathPrefix` filter
+- The `pagesOnly` / `includeDocs` logic
+- Existing token-tracking patterns (`setTokensUsed` + `updateTokensInDatabase`)
+
+All of the above run unchanged after discovery completes. Every new scrape call introduced by Tiers 2, 3, and the Reconciliation pass increments `tokensUsed` using the existing pattern.
 
 ---
 

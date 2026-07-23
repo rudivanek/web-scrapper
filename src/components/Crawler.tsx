@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Loader2, Eye, FileText, Save } from 'lucide-react';
+import { Search, Loader2, Eye, FileText, Save, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../hooks/useNotification';
@@ -42,6 +42,40 @@ interface CrawlerProps {
   onSaveSuccess?: () => void;
 }
 
+type DiscoveryMethod = 'map' | 'html-harvest' | 'deep-crawl' | null;
+
+interface SitemapGap {
+  claimed: number;
+  found: number;
+  missing: string[];
+}
+
+function stripWww(h: string): string {
+  return h.replace(/^www\./, '');
+}
+
+function normalizeLinks(hrefs: string[], baseUrl: string, rootHost: string): string[] {
+  const result: string[] = [];
+  for (const href of hrefs) {
+    const lower = href.toLowerCase();
+    if (lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('javascript:')) continue;
+    if (href === '#' || href.startsWith('#')) continue;
+
+    let u: URL;
+    try {
+      u = new URL(href, baseUrl);
+    } catch {
+      continue;
+    }
+
+    if (stripWww(u.hostname) !== stripWww(rootHost)) continue;
+
+    u.hash = '';
+    result.push(u.href);
+  }
+  return result;
+}
+
 export function Crawler({ onSaveSuccess }: CrawlerProps) {
   const [domain, setDomain] = useState('');
   const [maxUrls, setMaxUrls] = useState(50);
@@ -61,6 +95,8 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
   const [currentCrawlId, setCurrentCrawlId] = useState<string | null>(null);
   const [showLoadingModal, setShowLoadingModal] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processing...');
+  const [discoveryMethod, setDiscoveryMethod] = useState<DiscoveryMethod>(null);
+  const [sitemapGap, setSitemapGap] = useState<SitemapGap | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const { user } = useAuth();
@@ -144,10 +180,8 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       };
 
       if (activeModules.includes('keywords')) {
-        // Try to get keywords from metadata first (Firecrawl provides this)
         let metaKeywords = metadata.keywords || '';
 
-        // If not in metadata, try parsing from HTML
         if (!metaKeywords) {
           metaKeywords = doc.querySelector('meta[name="keywords"]')?.getAttribute('content') || '';
         }
@@ -171,7 +205,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       }
 
       if (activeModules.includes('metaTitle')) {
-        // Use extractSeoMetadata for consistent, robust title extraction
         const seoMeta = (html || rawHtml) ? extractSeoMetadata(html, rawHtml) : null;
         const NOT_FOUND = 'NOT FOUND';
 
@@ -187,7 +220,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       }
 
       if (activeModules.includes('metaDescription')) {
-        // Use extractSeoMetadata for consistent, robust description extraction
         const seoMeta = (html || rawHtml) ? extractSeoMetadata(html, rawHtml) : null;
         const NOT_FOUND = 'NOT FOUND';
 
@@ -326,7 +358,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
     throw new Error('Job timed out after 5 minutes');
   };
 
-  // Polls a /v1/crawl async job until complete, accumulating partial results
   const pollCrawlJob = async (
     jobId: string,
     onProgress: (msg: string) => void
@@ -342,11 +373,11 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
     while (attempts < maxAttempts) {
       attempts++;
 
-      const endpoint = nextUrl
+      const endpoint: string = nextUrl
         ? nextUrl.replace('https://api.firecrawl.dev', '')
         : `/v1/crawl/${jobId}`;
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+      const response: Response = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
         body: JSON.stringify({ endpoint, method: 'GET' }),
@@ -354,9 +385,8 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
 
       if (!response.ok) throw new Error(`Failed to check crawl status: ${response.status}`);
 
-      const data = await response.json();
+      const data: any = await response.json();
 
-      // Collect URLs from partial data pages
       if (data.data && Array.isArray(data.data)) {
         for (const page of data.data) {
           const u = page.metadata?.sourceURL || page.url || page.metadata?.url;
@@ -367,7 +397,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       onProgress(`JS crawl in progress — ${urls.length} pages found so far...`);
 
       if (data.status === 'completed') {
-        // Follow pagination if present
         if (data.next) {
           nextUrl = data.next;
           continue;
@@ -380,9 +409,89 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
 
-    // Return whatever we collected even if timed out
     if (urls.length > 0) return urls;
     throw new Error('JS crawl timed out after 10 minutes');
+  };
+
+  const discoverViaMap = async (rootHost: string, maxUrlsNum: number): Promise<string[]> => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    setLoadingMessage('Initiating crawl job...');
+
+    const response = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+      body: JSON.stringify({
+        endpoint: '/v1/map',
+        body: { url: `https://${rootHost}`, limit: maxUrlsNum * 2 },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const jobData = await response.json();
+
+    if (jobData.creditsUsed) {
+      setTokensUsed(prev => { const n = prev + jobData.creditsUsed; updateTokensInDatabase(n); return n; });
+    } else if (jobData.success) {
+      setTokensUsed(prev => { const n = prev + 1; updateTokensInDatabase(n); return n; });
+    }
+
+    let links: string[] = [];
+    if (jobData.links && Array.isArray(jobData.links)) {
+      links = jobData.links;
+    } else if (jobData.id) {
+      setLoadingMessage('Crawl job started. Waiting for results...');
+      const completedData = await pollJobStatus(jobData.id);
+
+      if (completedData.creditsUsed) {
+        setTokensUsed(prev => { const n = prev + completedData.creditsUsed; updateTokensInDatabase(n); return n; });
+      } else if (completedData.success && completedData.links) {
+        setTokensUsed(prev => { const n = prev + Math.ceil(completedData.links.length / 10); updateTokensInDatabase(n); return n; });
+      }
+
+      if (completedData.links && Array.isArray(completedData.links)) {
+        links = completedData.links;
+      }
+    }
+    return links;
+  };
+
+  const discoverViaCrawl = async (rootHost: string, maxUrlsNum: number): Promise<string[]> => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    setLoadingMessage('Starting JS crawl (this may take a few minutes)...');
+
+    const crawlResponse = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+      body: JSON.stringify({
+        endpoint: '/v1/crawl',
+        body: {
+          url: `https://${rootHost}`,
+          limit: maxUrlsNum * 2,
+          scrapeOptions: { formats: ['links'] },
+        },
+      }),
+    });
+
+    if (!crawlResponse.ok) {
+      const errorData = await crawlResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${crawlResponse.status}: ${crawlResponse.statusText}`);
+    }
+
+    const crawlJobData = await crawlResponse.json();
+
+    if (!crawlJobData.id) {
+      throw new Error('Firecrawl /v1/crawl did not return a job ID');
+    }
+
+    return await pollCrawlJob(crawlJobData.id, (msg) => setLoadingMessage(msg));
   };
 
   const handleCancelCrawl = () => {
@@ -410,10 +519,11 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
     setTokensUsed(0);
     setTokensCost(0);
     setCurrentCrawlId(null);
+    setDiscoveryMethod(null);
+    setSitemapGap(null);
 
     try {
       const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      // Separate root hostname from any path prefix (e.g. "example.com/blog" → host="example.com", pathPrefix="/blog")
       const slashIdx = cleanDomain.indexOf('/');
       const rootHost = slashIdx !== -1 ? cleanDomain.slice(0, slashIdx) : cleanDomain;
       const pathPrefix = slashIdx !== -1 ? cleanDomain.slice(slashIdx) : '';
@@ -443,93 +553,25 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-      let rawDiscoveredLinks: string[] | null = null;
+      const NON_PAGE_EXTENSIONS = /\.(xml|kml|json|csv|txt|rss|atom|xsl|xslt|gz|zip|tar|rar|7z|ico|png|jpg|jpeg|gif|svg|webp|mp4|mp3|avi|mov|wmv|js|css|ts|woff|woff2|ttf|eot)(\?.*)?$/i;
+      const DOCUMENT_EXTENSIONS = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)(\?.*)?$/i;
+
+      // --- Discovery ---
+      let baseLinks: string[] = [];
+      let claimedCount = 0;
+      let usedSitemap = false;
 
       if (jsSpa) {
-        // JS/SPA mode: use /v1/crawl which renders JavaScript and follows client-side routes
-        setLoadingMessage('Starting JS crawl (this may take a few minutes)...');
-
-        const crawlResponse = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-          body: JSON.stringify({
-            endpoint: '/v1/crawl',
-            body: {
-              url: `https://${rootHost}`,
-              limit: maxUrls * 2,
-              scrapeOptions: { formats: ['links'] },
-            },
-          }),
-        });
-
-        if (!crawlResponse.ok) {
-          const errorData = await crawlResponse.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${crawlResponse.status}: ${crawlResponse.statusText}`);
-        }
-
-        const crawlJobData = await crawlResponse.json();
-
-        if (!crawlJobData.id) {
-          throw new Error('Firecrawl /v1/crawl did not return a job ID');
-        }
-
-        rawDiscoveredLinks = await pollCrawlJob(
-          crawlJobData.id,
-          (msg) => setLoadingMessage(msg)
-        );
+        // A2: Manual override — deep crawl directly, skip tiers 1-3
+        const crawlLinks = await discoverViaCrawl(rootHost, maxUrls);
+        baseLinks = crawlLinks.map((link: any) => typeof link === 'string' ? link : String(link));
+        setDiscoveryMethod('deep-crawl');
       } else {
-        // Standard mode: /v1/map (fast, static HTML + sitemap)
-        setLoadingMessage('Initiating crawl job...');
+        // Tier 1: Map + Sitemap (B1)
+        const mapLinks = await discoverViaMap(rootHost, maxUrls);
+        baseLinks = mapLinks.map((link: any) => typeof link === 'string' ? link : String(link));
 
-        const response = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-          body: JSON.stringify({
-            endpoint: '/v1/map',
-            body: { url: `https://${rootHost}`, limit: maxUrls * 2 },
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const jobData = await response.json();
-
-        if (jobData.creditsUsed) {
-          setTokensUsed(prev => { const n = prev + jobData.creditsUsed; updateTokensInDatabase(n); return n; });
-        } else if (jobData.success) {
-          setTokensUsed(prev => { const n = prev + 1; updateTokensInDatabase(n); return n; });
-        }
-
-        if (jobData.links && Array.isArray(jobData.links)) {
-          rawDiscoveredLinks = jobData.links;
-        } else if (jobData.id) {
-          setLoadingMessage('Crawl job started. Waiting for results...');
-          const completedData = await pollJobStatus(jobData.id);
-
-          if (completedData.creditsUsed) {
-            setTokensUsed(prev => { const n = prev + completedData.creditsUsed; updateTokensInDatabase(n); return n; });
-          } else if (completedData.success && completedData.links) {
-            setTokensUsed(prev => { const n = prev + Math.ceil(completedData.links.length / 10); updateTokensInDatabase(n); return n; });
-          }
-
-          if (completedData.links && Array.isArray(completedData.links)) {
-            rawDiscoveredLinks = completedData.links;
-          }
-        }
-      }
-
-      if (rawDiscoveredLinks !== null) {
-        const NON_PAGE_EXTENSIONS = /\.(xml|kml|json|csv|txt|rss|atom|xsl|xslt|gz|zip|tar|rar|7z|ico|png|jpg|jpeg|gif|svg|webp|mp4|mp3|avi|mov|wmv|js|css|ts|woff|woff2|ttf|eot)(\?.*)?$/i;
-        const DOCUMENT_EXTENSIONS = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)(\?.*)?$/i;
-
-        let baseLinks: string[] = rawDiscoveredLinks.map((link: any) =>
-          typeof link === 'string' ? link : String(link)
-        );
-
-        // Supplement with sitemap to catch pages Firecrawl map may miss (e.g. blog posts)
+        // Sitemap supplement (existing block, unchanged)
         setLoadingMessage('Supplementing with sitemap data...');
         try {
           const baseUrl = `https://${rootHost}`;
@@ -542,7 +584,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
             `${baseUrl}/page-sitemap.xml`,
           ];
 
-          // Check robots.txt for additional Sitemap: directives
           try {
             const robotsResp = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
               method: 'POST',
@@ -605,12 +646,14 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
           // sitemap supplement is best-effort
         }
 
-        // HTML link-harvest fallback: when map/sitemap produced too few URLs,
-        // scrape the homepage and extract <a href> links directly from the HTML.
-        // This catches sites with no published sitemap (e.g. Webflow with auto-sitemap off).
-        try {
-          const stripWww = (h: string) => h.replace(/^www\./, '');
+        // B2: Record claimed count
+        claimedCount = baseLinks.length;
+        usedSitemap = true;
+        // B3: Set discovery method
+        setDiscoveryMethod('map');
 
+        // Tier 2: HTML link harvest (C1-C10)
+        try {
           const harvestFromUrl = async (pageUrl: string): Promise<string[]> => {
             const scrapeResp = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
               method: 'POST',
@@ -625,7 +668,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
 
             const scrapeData = await scrapeResp.json();
 
-            // Token tracking
             const credits = scrapeData.creditsUsed ?? (scrapeData.success ? 1 : 0);
             if (credits) {
               setTokensUsed(prev => {
@@ -637,7 +679,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
 
             const candidates: string[] = [];
 
-            // (a) links array from Firecrawl
             const linksField = scrapeData.data?.links;
             if (Array.isArray(linksField)) {
               for (const link of linksField) {
@@ -646,7 +687,6 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
               }
             }
 
-            // (b) parse HTML for a[href]
             const htmlSource = scrapeData.data?.html || scrapeData.data?.rawHtml || '';
             if (htmlSource) {
               const parser = new DOMParser();
@@ -658,29 +698,7 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
               }
             }
 
-            const harvested: string[] = [];
-            for (const href of candidates) {
-              // Discard mailto:, tel:, javascript:, and pure-fragment hrefs
-              const lower = href.toLowerCase();
-              if (lower.startsWith('mailto:') || lower.startsWith('tel:') || lower.startsWith('javascript:')) continue;
-              if (href === '#' || href.startsWith('#')) continue;
-
-              let u: URL;
-              try {
-                u = new URL(href, `https://${rootHost}`);
-              } catch {
-                continue;
-              }
-
-              // Keep only same-host URLs (strip www. from both sides before comparing)
-              if (stripWww(u.hostname) !== stripWww(rootHost)) continue;
-
-              // Strip fragment, keep query string
-              u.hash = '';
-              harvested.push(u.href);
-            }
-
-            return harvested;
+            return normalizeLinks(candidates, `https://${rootHost}`, rootHost);
           };
 
           if (baseLinks.length <= 2) {
@@ -695,8 +713,8 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
               const beforeCount = baseLinks.length;
               baseLinks = Array.from(new Set([...baseLinks, ...harvested]));
               console.log(`HTML link harvest added ${harvested.length} URLs, total: ${baseLinks.length}`);
+              setDiscoveryMethod('html-harvest');
 
-              // Second-level pass: if still few URLs, scrape newly discovered pages
               if (baseLinks.length <= 5) {
                 if (abortControllerRef.current?.signal.aborted) {
                   throw new Error('Operation cancelled by user');
@@ -724,159 +742,263 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
           }
         } catch (err: any) {
           if (err?.message === 'Operation cancelled by user') throw err;
-          // best-effort supplement — log and continue silently
           console.error('HTML link harvest failed:', err);
         }
 
-        // Filter to path prefix if user entered a sub-path (e.g. example.com/blog)
-        if (pathPrefix) {
-          const prefixFilter = `https://${rootHost}${pathPrefix}`;
-          baseLinks = baseLinks.filter((u: string) => u.startsWith(prefixFilter));
-        }
-
-        // Supplement document files from sitemap when includeDocs is on
-        if (includeDocs) {
-          setLoadingMessage('Scanning sitemap for document files...');
+        // Tier 3: Auto-escalate to deep crawl (D1-D6)
+        if (baseLinks.length <= 2) {
           try {
-            const baseUrl = `https://${rootHost}`;
-            const sitemapUrls = [`${baseUrl}/sitemap.xml`, `${baseUrl}/sitemap_index.xml`];
-            for (const sitemapUrl of sitemapUrls) {
-              const sitemapResp = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
-                body: JSON.stringify({ endpoint: '/fetch-text', method: 'GET', url: sitemapUrl }),
-              });
-              if (sitemapResp.ok) {
-                const sitemapData = await sitemapResp.json();
-                if (sitemapData.content) {
-                  const locMatches = sitemapData.content.match(/<loc>(.*?)<\/loc>/g) || [];
-                  const sitemapDocUrls = locMatches
-                    .map((m: string) => m.replace(/<loc>|<\/loc>/g, '').trim())
-                    .filter((u: string) => DOCUMENT_EXTENSIONS.test(u));
-                  if (sitemapDocUrls.length > 0) {
-                    const merged = new Set([...baseLinks, ...sitemapDocUrls]);
-                    baseLinks = Array.from(merged);
-                  }
-                }
-              }
-            }
-          } catch (_e) {
-            // silently continue — sitemap scan is best-effort
-          }
-        }
-
-        const rawList = baseLinks;
-        const urlList = pagesOnly
-          ? rawList.filter((url: string) => {
-              if (NON_PAGE_EXTENSIONS.test(url)) return false;
-              if (DOCUMENT_EXTENSIONS.test(url)) return includeDocs;
-              return true;
-            })
-          : includeDocs
-            ? rawList
-            : rawList.filter((url: string) => !DOCUMENT_EXTENSIONS.test(url));
-
-        if (includeMeta) {
-          const batchSize = 5;
-          const detailedResults: SitemapEntry[] = [];
-
-          for (let i = 0; i < Math.min(urlList.length, maxUrls); i += batchSize) {
             if (abortControllerRef.current?.signal.aborted) {
               throw new Error('Operation cancelled by user');
             }
-            const batch = urlList.slice(i, Math.min(i + batchSize, maxUrls));
-            setLoadingMessage(`Scraping pages ${i + 1}-${Math.min(i + batchSize, maxUrls)} of ${Math.min(urlList.length, maxUrls)}...`);
 
-            const batchResults = await Promise.all(
-              batch.map(async (url: string) => {
-                try {
-                  const scrapeResponse = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${supabaseKey}`,
-                    },
-                    body: JSON.stringify({
-                      endpoint: '/v1/scrape',
-                      body: {
-                        url: url,
-                        formats: ['markdown', 'html', 'rawHtml'],
-                      },
-                    }),
-                  });
-
-                  if (scrapeResponse.ok) {
-                    const scrapeData = await scrapeResponse.json();
-                    const html = scrapeData.data?.html || '';
-                    const rawHtml = scrapeData.data?.rawHtml || '';
-                    const metadata = scrapeData.data?.metadata || {};
-
-                    const seoMeta = (html || rawHtml) ? extractSeoMetadata(html, rawHtml) : null;
-                    const NOT_FOUND = 'NOT FOUND';
-
-                    let title = '';
-                    if (seoMeta?.metaTitle && seoMeta.metaTitle !== NOT_FOUND) {
-                      title = seoMeta.metaTitle;
-                    } else {
-                      try {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html || rawHtml, 'text/html');
-                        title = doc.querySelector('title')?.textContent?.trim() ||
-                                (Array.isArray(metadata.title) ? metadata.title[0] : metadata.title) || '';
-                      } catch {
-                        title = (Array.isArray(metadata.title) ? metadata.title[0] : metadata.title) || '';
-                      }
-                    }
-
-                    let description = '';
-                    if (seoMeta?.metaDescription && seoMeta.metaDescription !== NOT_FOUND) {
-                      description = seoMeta.metaDescription;
-                    } else {
-                      try {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(html || rawHtml, 'text/html');
-                        description = doc.querySelector('meta[name="description"]')?.getAttribute('content') ||
-                                     (Array.isArray(metadata.description) ? metadata.description[0] : metadata.description) || '';
-                      } catch {
-                        description = (Array.isArray(metadata.description) ? metadata.description[0] : metadata.description) || '';
-                      }
-                    }
-
-                    if (scrapeData.creditsUsed) {
-                      setTokensUsed(prev => {
-                        const newTotal = prev + scrapeData.creditsUsed;
-                        updateTokensInDatabase(newTotal);
-                        return newTotal;
-                      });
-                    } else if (scrapeData.success) {
-                      setTokensUsed(prev => {
-                        const newTotal = prev + 1;
-                        updateTokensInDatabase(newTotal);
-                        return newTotal;
-                      });
-                    }
-
-                    return { url, title, description };
-                  }
-                } catch (err) {
-                  console.error(`Failed to scrape ${url}:`, err);
-                }
-                return { url };
-              })
-            );
-
-            detailedResults.push(...batchResults);
+            setLoadingMessage('Few pages found — switching to deep crawl (this may take a few minutes)...');
+            const crawlLinks = await discoverViaCrawl(rootHost, maxUrls);
+            baseLinks = Array.from(new Set([...baseLinks, ...crawlLinks]));
+            console.log(`Auto-escalated to /v1/crawl, total URLs: ${baseLinks.length}`);
+            setDiscoveryMethod('deep-crawl');
+          } catch (err: any) {
+            if (err?.message === 'Operation cancelled by user') throw err;
+            console.error('Auto-escalation to deep crawl failed:', err);
           }
+        }
+      }
 
-          setResults(detailedResults);
-        } else {
-          setResults(urlList.slice(0, maxUrls).map((url: string) => ({ url })));
+      // --- Common filtering (G1-G3: unchanged) ---
+      if (pathPrefix) {
+        const prefixFilter = `https://${rootHost}${pathPrefix}`;
+        baseLinks = baseLinks.filter((u: string) => u.startsWith(prefixFilter));
+      }
+
+      if (includeDocs) {
+        setLoadingMessage('Scanning sitemap for document files...');
+        try {
+          const baseUrl = `https://${rootHost}`;
+          const sitemapUrls = [`${baseUrl}/sitemap.xml`, `${baseUrl}/sitemap_index.xml`];
+          for (const sitemapUrl of sitemapUrls) {
+            const sitemapResp = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+              body: JSON.stringify({ endpoint: '/fetch-text', method: 'GET', url: sitemapUrl }),
+            });
+            if (sitemapResp.ok) {
+              const sitemapData = await sitemapResp.json();
+              if (sitemapData.content) {
+                const locMatches = sitemapData.content.match(/<loc>(.*?)<\/loc>/g) || [];
+                const sitemapDocUrls = locMatches
+                  .map((m: string) => m.replace(/<loc>|<\/loc>/g, '').trim())
+                  .filter((u: string) => DOCUMENT_EXTENSIONS.test(u));
+                if (sitemapDocUrls.length > 0) {
+                  const merged = new Set([...baseLinks, ...sitemapDocUrls]);
+                  baseLinks = Array.from(merged);
+                }
+              }
+            }
+          }
+        } catch (_e) {
+          // silently continue — sitemap scan is best-effort
+        }
+      }
+
+      const rawList = baseLinks;
+      const urlList = pagesOnly
+        ? rawList.filter((url: string) => {
+            if (NON_PAGE_EXTENSIONS.test(url)) return false;
+            if (DOCUMENT_EXTENSIONS.test(url)) return includeDocs;
+            return true;
+          })
+        : includeDocs
+          ? rawList
+          : rawList.filter((url: string) => !DOCUMENT_EXTENSIONS.test(url));
+
+      if (includeMeta) {
+        const batchSize = 5;
+        const detailedResults: SitemapEntry[] = [];
+        const observedUrls = new Set<string>();
+
+        // E1: Helper to scrape a page for details + collect links
+        const scrapePageForDetails = async (url: string): Promise<{ result: SitemapEntry; links: string[] }> => {
+          try {
+            const scrapeResponse = await fetch(`${supabaseUrl}/functions/v1/firecrawl-proxy`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseKey}` },
+              body: JSON.stringify({
+                endpoint: '/v1/scrape',
+                body: { url, formats: ['markdown', 'html', 'rawHtml', 'links'] },
+              }),
+            });
+
+            if (scrapeResponse.ok) {
+              const scrapeData = await scrapeResponse.json();
+              const html = scrapeData.data?.html || '';
+              const rawHtml = scrapeData.data?.rawHtml || '';
+              const metadata = scrapeData.data?.metadata || {};
+
+              const seoMeta = (html || rawHtml) ? extractSeoMetadata(html, rawHtml) : null;
+              const NOT_FOUND = 'NOT FOUND';
+
+              let title = '';
+              if (seoMeta?.metaTitle && seoMeta.metaTitle !== NOT_FOUND) {
+                title = seoMeta.metaTitle;
+              } else {
+                try {
+                  const parser = new DOMParser();
+                  const doc = parser.parseFromString(html || rawHtml, 'text/html');
+                  title = doc.querySelector('title')?.textContent?.trim() ||
+                          (Array.isArray(metadata.title) ? metadata.title[0] : metadata.title) || '';
+                } catch {
+                  title = (Array.isArray(metadata.title) ? metadata.title[0] : metadata.title) || '';
+                }
+              }
+
+              let description = '';
+              if (seoMeta?.metaDescription && seoMeta.metaDescription !== NOT_FOUND) {
+                description = seoMeta.metaDescription;
+              } else {
+                try {
+                  const parser = new DOMParser();
+                  const doc = parser.parseFromString(html || rawHtml, 'text/html');
+                  description = doc.querySelector('meta[name="description"]')?.getAttribute('content') ||
+                               (Array.isArray(metadata.description) ? metadata.description[0] : metadata.description) || '';
+                } catch {
+                  description = (Array.isArray(metadata.description) ? metadata.description[0] : metadata.description) || '';
+                }
+              }
+
+              if (scrapeData.creditsUsed) {
+                setTokensUsed(prev => {
+                  const newTotal = prev + scrapeData.creditsUsed;
+                  updateTokensInDatabase(newTotal);
+                  return newTotal;
+                });
+              } else if (scrapeData.success) {
+                setTokensUsed(prev => {
+                  const newTotal = prev + 1;
+                  updateTokensInDatabase(newTotal);
+                  return newTotal;
+                });
+              }
+
+              // E2: Collect same-host links from this page
+              const candidates: string[] = [];
+              const linksField = scrapeData.data?.links;
+              if (Array.isArray(linksField)) {
+                for (const link of linksField) {
+                  const href = typeof link === 'string' ? link : (link?.url ?? '');
+                  if (href) candidates.push(href);
+                }
+              }
+              const htmlSource = html || rawHtml;
+              if (htmlSource) {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlSource, 'text/html');
+                const anchors = Array.from(doc.querySelectorAll('a[href]'));
+                for (const a of anchors) {
+                  const href = a.getAttribute('href') || '';
+                  if (href) candidates.push(href);
+                }
+              }
+              const pageLinks = normalizeLinks(candidates, url, rootHost);
+
+              return { result: { url, title, description }, links: pageLinks };
+            }
+          } catch (err) {
+            console.error(`Failed to scrape ${url}:`, err);
+          }
+          return { result: { url }, links: [] };
+        };
+
+        // Helper: apply same filters to a URL list (E3)
+        const filterUrls = (urls: string[]): string[] => {
+          let filtered = urls;
+          if (pathPrefix) {
+            const prefixFilter = `https://${rootHost}${pathPrefix}`;
+            filtered = filtered.filter(u => u.startsWith(prefixFilter));
+          }
+          if (pagesOnly) {
+            filtered = filtered.filter(u => {
+              if (NON_PAGE_EXTENSIONS.test(u)) return false;
+              if (DOCUMENT_EXTENSIONS.test(u)) return includeDocs;
+              return true;
+            });
+          } else if (!includeDocs) {
+            filtered = filtered.filter(u => !DOCUMENT_EXTENSIONS.test(u));
+          }
+          return filtered;
+        };
+
+        // Initial batch scrape
+        for (let i = 0; i < Math.min(urlList.length, maxUrls); i += batchSize) {
+          if (abortControllerRef.current?.signal.aborted) {
+            throw new Error('Operation cancelled by user');
+          }
+          const batch = urlList.slice(i, Math.min(i + batchSize, maxUrls));
+          setLoadingMessage(`Scraping pages ${i + 1}-${Math.min(i + batchSize, maxUrls)} of ${Math.min(urlList.length, maxUrls)}...`);
+
+          const batchData = await Promise.all(batch.map(scrapePageForDetails));
+          for (const d of batchData) {
+            detailedResults.push(d.result);
+            for (const u of d.links) observedUrls.add(u);
+          }
         }
 
-        showSuccess('Crawl completed successfully!');
+        // Part E: Reconciliation — find pages not in the sitemap
+        try {
+          let round = 0;
+          const maxRounds = 2;
+          const allMissing: string[] = [];
+
+          while (round < maxRounds) {
+            const urlSet = new Set(urlList);
+            const missing = [...observedUrls].filter(u => !urlSet.has(u));
+            const filteredMissing = filterUrls(missing);
+
+            if (filteredMissing.length === 0 || detailedResults.length >= maxUrls) break;
+
+            if (abortControllerRef.current?.signal.aborted) {
+              throw new Error('Operation cancelled by user');
+            }
+
+            setLoadingMessage(`Found ${filteredMissing.length} pages not listed in the sitemap — scraping...`);
+            allMissing.push(...filteredMissing);
+
+            const remaining = maxUrls - detailedResults.length;
+            const toScrape = filteredMissing.slice(0, remaining);
+
+            for (let i = 0; i < toScrape.length; i += batchSize) {
+              if (abortControllerRef.current?.signal.aborted) {
+                throw new Error('Operation cancelled by user');
+              }
+              const batch = toScrape.slice(i, Math.min(i + batchSize, toScrape.length));
+              const batchData = await Promise.all(batch.map(scrapePageForDetails));
+              for (const d of batchData) {
+                detailedResults.push(d.result);
+                for (const u of d.links) observedUrls.add(u);
+              }
+            }
+
+            round++;
+          }
+
+          // E5: Populate sitemapGap
+          if (allMissing.length > 0 && usedSitemap) {
+            setSitemapGap({
+              claimed: claimedCount,
+              found: detailedResults.length,
+              missing: allMissing,
+            });
+          }
+        } catch (err: any) {
+          if (err?.message === 'Operation cancelled by user') throw err;
+          console.error('Reconciliation failed:', err);
+        }
+
+        setResults(detailedResults);
       } else {
-        throw new Error('Unexpected response format from Firecrawl API');
+        setResults(urlList.slice(0, maxUrls).map((url: string) => ({ url })));
       }
+
+      showSuccess('Crawl completed successfully!');
     } catch (err: any) {
       if (err.message !== 'Operation cancelled by user') {
         setError(err.message || 'Failed to crawl website');
@@ -1156,6 +1278,14 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
     }
   };
 
+  const discoveryMethodLabel = (method: DiscoveryMethod): string => {
+    switch (method) {
+      case 'map': return 'Páginas encontradas vía sitemap';
+      case 'html-harvest': return 'Sitio sin sitemap — páginas encontradas analizando los enlaces del sitio';
+      case 'deep-crawl': return 'Sitio dinámico detectado — se usó rastreo profundo';
+      default: return '';
+    }
+  };
 
   return (
     <>
@@ -1302,6 +1432,32 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
                 )}
               </div>
             </div>
+
+            {discoveryMethod && (
+              <div className="px-8 pt-4">
+                <p className="text-xs text-neutral-500">{discoveryMethodLabel(discoveryMethod)}</p>
+              </div>
+            )}
+
+            {sitemapGap && sitemapGap.missing.length > 0 && (
+              <div className="mx-8 mt-4 p-4 bg-amber-50 border border-amber-300">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-amber-900 font-medium">
+                      El mapa del sitio no incluye {sitemapGap.missing.length} página(s) que sí existen en el sitio. Esto puede impedir que Google las encuentre.
+                    </p>
+                    <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                      {sitemapGap.missing.map((url, idx) => (
+                        <li key={idx} className="text-xs text-amber-700 break-all">
+                          {url}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <AnalysisToggleBar
               activeModules={activeModules}
