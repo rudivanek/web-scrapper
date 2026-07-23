@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Code2, Eye } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
 import { callFirecrawl } from '../lib/firecrawl';
-import { callClaude } from '../lib/callClaude';
+import { callClaude, screenshotToBase64 } from '../lib/callClaude';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
   DESIGN_SYSTEM_PROMPT,
@@ -23,7 +23,6 @@ interface ExtractionResult {
   designMd: string;
   blueprintJson: string;
   screenshot: string | null;
-  extractData: unknown;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -140,43 +139,8 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
     setResult(null);
 
     try {
-      // Phase 1A: Design scrape
-      setPhase('scrape-design', 'Running design scrape (extract + rawHtml)...', 10);
-      const designScrape = await callFirecrawl({
-        endpoint: '/v1/scrape',
-        method: 'POST',
-        body: {
-          url: normalized,
-          formats: ['extract', 'rawHtml'],
-          extract: {
-            prompt: 'Extract the brand design system from this page. Find: (1) the background color of the main CTA button, (2) the text color of the main CTA button, (3) the font-family used on headings, (4) the font-family used on body text, (5) the background color of the navigation bar, (6) the background color of the footer, (7) any Google Fonts or font CDN URLs in the page head, (8) the primary brand hex color used on buttons or links, (9) any accent or highlight color used decoratively. Be specific — return actual hex values, not descriptive names.',
-            schema: {
-              type: 'object',
-              properties: {
-                brand_name: { type: 'string' },
-                cta_button_background: { type: 'string', description: 'Hex color of the main call-to-action button background' },
-                cta_button_text_color: { type: 'string', description: 'Hex color of text on the main CTA button' },
-                nav_background: { type: 'string', description: 'Hex color of the navigation bar background' },
-                footer_background: { type: 'string', description: 'Hex color of the footer background' },
-                body_text_color: { type: 'string', description: 'Hex color of the main body text' },
-                heading_color: { type: 'string', description: 'Hex color of h1/h2 headings' },
-                link_color: { type: 'string', description: 'Hex color of content area links' },
-                accent_color: { type: 'string', description: 'Any accent/highlight color used decoratively, if present' },
-                heading_font: { type: 'string', description: 'Font family name used on headings' },
-                body_font: { type: 'string', description: 'Font family name used on body text' },
-                google_fonts_url: { type: 'string', description: 'Full Google Fonts CDN URL from the page head if present' },
-                logo_url: { type: 'string' },
-              },
-            },
-          },
-        },
-      });
-
-      const extractData = designScrape?.data?.extract ?? designScrape?.extract ?? {};
-      const designRawHtml: string = designScrape?.data?.rawHtml ?? designScrape?.rawHtml ?? '';
-
-      // Phase 1B: Structure scrape
-      setPhase('scrape-structure', 'Running structure scrape (rawHtml + screenshot)...', 30);
+      // Phase 1: Structure scrape with screenshot (moved before design LLM call)
+      setPhase('scrape-structure', 'Running structure scrape (rawHtml + screenshot)...', 10);
       const structureScrape = await callFirecrawl({
         endpoint: '/v1/scrape',
         method: 'POST',
@@ -187,27 +151,27 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         },
       });
 
-      const structureRawHtml: string = structureScrape?.data?.rawHtml ?? structureScrape?.rawHtml ?? '';
+      const rawHtml: string = structureScrape?.data?.rawHtml ?? structureScrape?.rawHtml ?? '';
       const screenshot: string | null = structureScrape?.data?.screenshot ?? structureScrape?.screenshot ?? null;
 
-      // Use whichever rawHtml is longer/richer
-      const rawHtmlForBlueprint = structureRawHtml.length >= designRawHtml.length ? structureRawHtml : designRawHtml;
-
       // Phase 2: Pre-process HTML
-      const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtmlForBlueprint);
-      // Also pre-process design HTML for CSS blocks if it has more style content
-      const designPreprocessed = preprocessHtml(designRawHtml);
-      const allCssBlocks = cssBlocks.length >= designPreprocessed.cssBlocks.length ? cssBlocks : designPreprocessed.cssBlocks;
+      const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
 
-      // Phase 3: LLM Call A — design.md
-      setPhase('llm-design', 'Generating design.md with Claude...', 55);
-      const designUserPrompt = buildDesignUserPrompt(extractData, allCssBlocks, inlineStyles);
-      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000);
+      // Convert screenshot to base64 for Claude vision (if it's a URL)
+      let screenshotBase64: string | null = null;
+      if (screenshot) {
+        screenshotBase64 = await screenshotToBase64(screenshot);
+      }
 
-      // Phase 4: LLM Call B — blueprint JSON
-      setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 78);
-      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml);
-      const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000);
+      // Phase 3: LLM Call A — design.md (with screenshot)
+      setPhase('llm-design', 'Generating design.md with Claude...', 35);
+      const designUserPrompt = buildDesignUserPrompt(cssBlocks, inlineStyles);
+      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotBase64 ?? undefined);
+
+      // Phase 4: LLM Call B — blueprint JSON (with screenshot + design.md as context)
+      setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 70);
+      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd);
+      const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotBase64 ?? undefined);
 
       // Attempt to parse and re-stringify for clean JSON
       let blueprintJson = blueprintRaw.trim();
@@ -220,7 +184,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot, extractData });
+      setResult({ designMd, blueprintJson, screenshot });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -247,8 +211,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const site = hostname(url);
 
   const phases: Array<{ key: ExtractionState['phase']; label: string }> = [
-    { key: 'scrape-design', label: 'Phase 1A — Design scrape (Firecrawl extract)' },
-    { key: 'scrape-structure', label: 'Phase 1B — Structure scrape (rawHtml + screenshot)' },
+    { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
     { key: 'llm-design', label: 'Phase 2 — Generate design.md (Claude)' },
     { key: 'llm-blueprint', label: 'Phase 3 — Generate blueprint JSON (Claude)' },
   ];
@@ -268,7 +231,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       <div className="mb-8">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Design Extractor</h2>
         <p className="text-sm text-gray-500">
-          Two-phase pipeline: Firecrawl scrapes brand data and page structure, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> and page blueprint JSON.
+          Two-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> and page blueprint JSON.
         </p>
       </div>
 
@@ -350,22 +313,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               <img src={result.screenshot} alt="Page screenshot" className="w-full object-cover max-h-64" />
             </div>
           )}
-
-          {/* Extract JSON (collapsible) */}
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <details>
-              <summary className="flex items-center space-x-3 px-5 py-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors select-none">
-                <Code2 className="w-4 h-4 text-gray-500" />
-                <span className="font-semibold text-gray-800 text-sm">Firecrawl Extract Data</span>
-                <span className="text-xs text-gray-400 ml-auto mr-2">raw brand JSON from Firecrawl</span>
-              </summary>
-              <div className="p-5 border-t border-gray-200">
-                <pre className="text-xs font-mono bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-64">
-                  {JSON.stringify(result.extractData, null, 2)}
-                </pre>
-              </div>
-            </details>
-          </div>
 
           {/* design.md output */}
           <OutputPanel

@@ -1,6 +1,6 @@
 export const DESIGN_SYSTEM_PROMPT = `You are a precision design system analyst. You will receive:
-1. Branding/extract data from a website (colors, fonts, brand name, logo)
-2. Raw HTML including <style> tags and inline styles from that website
+1. Raw HTML including <style> tags and inline styles from the target website
+2. A full-page screenshot of the rendered website
 
 Your task: Generate a complete, production-ready design.md file.
 
@@ -8,7 +8,7 @@ Your task: Generate a complete, production-ready design.md file.
 
 You are an extraction agent, not a design agent.
 
-If a color, font, URL, or value cannot be directly traced to the provided HTML, CSS, or extract JSON:
+If a color, font, URL, or value cannot be directly traced to the provided CSS, inline styles, or screenshot:
 - Write EXACTLY: \`NOT FOUND — verify manually\`
 - DO NOT substitute a "reasonable default"
 - DO NOT use Material Design, Bootstrap, or any other design system as a fallback
@@ -18,7 +18,17 @@ If a color, font, URL, or value cannot be directly traced to the provided HTML, 
 A design.md with 6 confirmed real values is worth more than one with 40 hallucinated values.
 Incomplete output that is honest is correct. Complete output that is fabricated is broken.
 
-If the extraction returns empty color/font fields, say so explicitly in the output and leave those tokens as NOT FOUND. Do not attempt to fill them.
+Rule 0 has no exceptions anywhere in this prompt. If any later instruction appears to permit inferring, defaulting, or estimating a value, Rule 0 overrides it.
+
+## SCREENSHOT USAGE
+
+You are given a full-page screenshot alongside the CSS. Use it to VERIFY and DISAMBIGUATE, never to invent. Specifically:
+- When multiple CSS rules could apply, the screenshot decides which renders
+- Confirm which sections are dark vs light vs off-white
+- Confirm the real visual hierarchy of H1 vs H2 vs H3 (relative size and weight)
+- Confirm whether the nav is transparent or has a background
+
+If the screenshot contradicts the CSS, report BOTH and say which you believe renders, with your reason. Do not read hex values off the screenshot — colors must still come from CSS.
 
 ## CRITICAL RULES
 
@@ -86,15 +96,20 @@ FONT FALLBACK — JAVASCRIPT-LOADED FONTS: If after all 6 steps you found NO cus
 > ⚠ No custom fonts detected in HTML. This site may load fonts via JavaScript (common on Elementor, Webflow). CHECK FONTS MANUALLY — open the site in a browser, right-click a heading, Inspect → Computed tab → font-family. Edit design.md manually before using it.
 
 ### Type Scale — Real Computed Sizes
-For headline sizes, extract the ACTUAL computed font-size from H1, H2, H3. Look in inline styles, class-based CSS, and theme CSS. NEVER write "default size" or "None". If you cannot determine the exact value, infer: H1=48px, H2=36px, H3=28px, H4=22px.
+For headline sizes, extract the ACTUAL computed font-size from H1, H2, H3. Look in inline styles, class-based CSS, and theme CSS. NEVER write "default size" or "None". If a size cannot be traced to CSS or confirmed visually, write NOT FOUND — verify manually.
 
 ### NEVER INVENT DATA
-CRITICAL: If a color, font, or design token cannot be evidenced from the provided CSS, HTML, or extract JSON, write "NOT FOUND — verify manually" for that field. DO NOT infer, guess, or derive values from the brand name, industry conventions, or aesthetic judgment. A hallucinated color is infinitely worse than a missing one. The only exception is the standard semantic colors (success, warning, error, info) which may use widely-accepted defaults (green, orange, red, blue) when no site-specific values are found.
+CRITICAL: If a color, font, or design token cannot be evidenced from the provided CSS, HTML, or screenshot, write "NOT FOUND — verify manually" for that field. DO NOT infer, guess, or derive values from the brand name, industry conventions, or aesthetic judgment. A hallucinated color is infinitely worse than a missing one. If no success/warning/error/info colors exist in the CSS, they are NOT FOUND — do not use defaults.
 
 ### General
 - Resolve ALL CSS variables to their actual hex/rgb values. NEVER output var(--color-x).
 - Be extremely specific — exact px values, exact hex codes, exact font weights.
 - Include EVERY color actually used on the page.
+
+### :root Block — Valid Pasteable CSS
+The final :root block must be VALID, PASTEABLE CSS. Never emit \`--token: NOT FOUND — verify manually;\` — that breaks any stylesheet. Comment unresolved tokens out instead:
+  /* --shadow-sm: NOT FOUND — verify manually */
+Every uncommented declaration must be a real, valid CSS value. The NOT FOUND markers stay in the human-readable tables above; only the :root block is sanitized.
 
 ## OUTPUT FORMAT (follow exactly):
 
@@ -283,6 +298,16 @@ padding: [value];
 
 export const BLUEPRINT_SYSTEM_PROMPT = `You are a precise web page structure analyst. Extract every section and global element from the provided HTML and return a structured JSON blueprint.
 
+You are given the design.md generated from this same page. Use its resolved color tokens to populate each section's background_color and text_color with real hex values instead of null. If a section's background cannot be determined from design.md or the screenshot, use null — do not guess.
+
+You are also given a full-page screenshot of the rendered page. Use it to verify section boundaries, visual hierarchy, and which elements are actually visible to users.
+
+Do NOT create separate sections for responsive variants of the same component. If a desktop carousel and a mobile grid show the same content, that is ONE section — record the mobile behavior in mobile_layout and layout_contract. Sections are distinct content blocks, not breakpoint variants.
+
+Never truncate body_text mid-word. Include the complete text, or if you must shorten it, cut at a sentence boundary and append ' […]' so downstream consumers know it is partial.
+
+cta_buttons must list every button, link-styled-as-button, and primary action in the section. An empty array means the section genuinely has none. Check the screenshot before returning an empty array.
+
 ## OUTPUT FORMAT
 
 Return ONLY valid JSON with this exact structure:
@@ -350,57 +375,14 @@ Return ONLY valid JSON with this exact structure:
 - Extract actual text content for headline/subheadline/body_text when visible
 - Return ONLY the JSON object, no markdown fences, no explanation`;
 
-const EXTRACT_FIELDS = [
-  'cta_button_background',
-  'cta_button_text_color',
-  'nav_background',
-  'footer_background',
-  'body_text_color',
-  'heading_color',
-  'link_color',
-  'accent_color',
-  'heading_font',
-  'body_font',
-  'google_fonts_url',
-  'logo_url',
-  'brand_name',
-] as const;
-
-function annotateExtract(extractJson: unknown): string {
-  const obj = (extractJson && typeof extractJson === 'object' && !Array.isArray(extractJson))
-    ? extractJson as Record<string, unknown>
-    : {};
-
-  const annotated: Record<string, unknown> = {};
-  for (const field of EXTRACT_FIELDS) {
-    const val = obj[field];
-    annotated[field] = (val !== undefined && val !== null && val !== '')
-      ? val
-      : 'NOT RETURNED BY FIRECRAWL — do not invent, write NOT FOUND';
-  }
-  // Pass through any extra keys Firecrawl returned
-  for (const [k, v] of Object.entries(obj)) {
-    if (!(k in annotated)) annotated[k] = v;
-  }
-  return JSON.stringify(annotated, null, 2);
-}
-
 export function buildDesignUserPrompt(
-  extractJson: unknown,
   cssBlocks: string[],
   inlineStyles: string[]
 ): string {
   const noCssBlocks = cssBlocks.length === 0 || cssBlocks.every(b => !b.trim());
   const noInlineStyles = inlineStyles.length === 0;
 
-  return `Here is the branding extract data from the website.
-IMPORTANT: Any field marked "NOT RETURNED BY FIRECRAWL" means the scraper found no value. Write "NOT FOUND — verify manually" for that token. DO NOT invent a substitute.
-
-\`\`\`json
-${annotateExtract(extractJson)}
-\`\`\`
-
-Here are the CSS blocks extracted from the page${noCssBlocks ? ' (NONE FOUND — no <style> blocks were returned)' : ''}:
+  return `Here are the CSS blocks extracted from the page${noCssBlocks ? ' (NONE FOUND — no <style> blocks were returned)' : ''}:
 
 \`\`\`css
 ${noCssBlocks ? '/* No CSS blocks returned */' : cssBlocks.join('\n\n/* --- next style block --- */\n\n')}
@@ -410,13 +392,17 @@ Sample inline styles found${noInlineStyles ? ' (NONE FOUND)' : ''}:
 
 ${noInlineStyles ? '(no inline styles returned)' : inlineStyles.slice(0, 50).join('\n')}
 
-Generate the complete design.md file. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value.`;
+Generate the complete design.md file. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }
 
-export function buildBlueprintUserPrompt(cleanedHtml: string): string {
+export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string): string {
+  const designContext = designMd
+    ? `\n\nHere is the design.md generated from this same page. Use its resolved color tokens to populate background_color and text_color fields with real hex values:\n\n\`\`\`markdown\n${designMd}\n\`\`\``
+    : '';
+
   return `Here is the raw HTML from the webpage. Extract all sections and globals:
 
-${cleanedHtml}
+${cleanedHtml}${designContext}
 
 Return a valid JSON object following the exact format in the system prompt. Include ALL sections in page order.`;
 }

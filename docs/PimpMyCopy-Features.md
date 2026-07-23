@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.12 | Last Updated: 2026-07-23T13:00:00Z -->
+<!-- Version: 1.13 | Last Updated: 2026-07-23T14:00:00Z -->
 
 ---
 
@@ -1135,13 +1135,14 @@ A new "Design Extract" tab in the main Scrape panel runs a production-grade two-
 
 ### Pipeline Overview
 
-The pipeline is split into four sequential phases:
+**Updated:** 2026-07-23 — Removed the Firecrawl `extract` format entirely; added screenshot-to-Claude vision; chained design.md into the blueprint call.
 
-**Phase 1A — Design scrape (Firecrawl extract)**
-Calls `POST /v1/scrape` with formats `extract` and `rawHtml`. The `extract` schema requests: `brand_name`, `colors` (object), `fonts` (array), `logo_url`, `primary_color`, `accent_color`, `background_color`, and `text_color`. The result is stored as `extractData` (structured brand JSON) and `designRawHtml`.
+The pipeline is now split into three sequential phases:
 
-**Phase 1B — Structure scrape (Firecrawl rawHtml + screenshot)**
-Calls `POST /v1/scrape` with formats `rawHtml` and `screenshot@fullPage`, with `onlyMainContent: false`. Returns the full page HTML and a base64 full-page screenshot. The larger of the two rawHtml responses (design vs structure) is used for blueprint generation.
+**Phase 1 — Structure scrape (Firecrawl rawHtml + screenshot)**
+Calls `POST /v1/scrape` with formats `rawHtml` and `screenshot@fullPage`, with `onlyMainContent: false`. Returns the full page HTML and a full-page screenshot. This scrape runs BEFORE any LLM call so the screenshot is available to both Claude calls.
+
+> **Why the `extract` format was removed (2026-07-23):** Firecrawl's LLM-powered `extract` returned fabricated values. For an Elementor site using Manrope, #000000, and #0055ff, it returned the Bootstrap 4 default palette (#007BFF / #343A40 / #212529 / #FFC107) and a Roboto Google Fonts URL. Every value was wrong. All of this data is already available deterministically in the CSS blocks and inline styles extracted by `htmlPreprocess.ts`, so the `extract` call was a fabrication surface with no upside.
 
 **Phase 2 — HTML Pre-processing (client-side, before any LLM call)**
 Runs a five-step cleaning pipeline (`src/lib/htmlPreprocess.ts`):
@@ -1151,16 +1152,35 @@ Runs a five-step cleaning pipeline (`src/lib/htmlPreprocess.ts`):
 4. Extract CSS separately: up to 5 `<style>` block contents and up to 50 `style=""` inline attribute values.
 5. Truncate: if cleaned HTML exceeds 80,000 chars, keep first 60,000 + last 20,000, joined with a truncation comment.
 
-**Phase 3 — LLM Call A: Generate design.md (Claude claude-sonnet-4-6)**
-Sends the Firecrawl extract JSON, up to 5 CSS blocks, and up to 50 inline style samples to Claude with the `DESIGN_SYSTEM_PROMPT`. The prompt instructs Claude to:
+**Phase 3 — LLM Call A: Generate design.md (Claude claude-sonnet-4-6, with screenshot)**
+Sends up to 5 CSS blocks, up to 50 inline style samples, AND the full-page screenshot (as base64 image) to Claude with the `DESIGN_SYSTEM_PROMPT`. The screenshot is used to VERIFY and DISAMBIGUATE — never to invent. Specifically:
+- When multiple CSS rules could apply, the screenshot decides which renders
+- Confirm which sections are dark vs light vs off-white
+- Confirm the real visual hierarchy of H1 vs H2 vs H3 (relative size and weight)
+- Confirm whether the nav is transparent or has a background
+- If the screenshot contradicts the CSS, report BOTH and say which renders, with reasoning
+- Hex values must still come from CSS — never read colors off the screenshot
+
+The prompt instructs Claude to:
+- Obey **Rule 0** — absolute prohibition on fabrication. If a value cannot be traced to CSS, inline styles, or the screenshot, write `NOT FOUND — verify manually`. No exceptions, no defaults, no Bootstrap/Material fallbacks.
 - Ignore all `--wp--preset--*` WordPress boilerplate variables
 - Detect fonts by scanning the preserved font CDN URLs, then `@font-face` declarations, then CSS `font-family` rules
 - Resolve all CSS `var(--x)` references to actual hex values
 - Never output system font stacks if a custom font is present
-- Output a complete design system in a specified format covering: Color Palette (primary, secondary, neutrals, semantic, background, text), Typography (font families with CDN URLs, type scale), Spacing System, Borders & Radius, Shadows, Transitions, Breakpoints, Component Specs (buttons, card, navigation, footer), and a complete `:root` CSS tokens block.
+- For type scale: if a size cannot be traced to CSS or confirmed visually, write `NOT FOUND — verify manually` (the previous H1=48px/H2=36px/H3=28px inference rule was deleted)
+- For semantic colors: if no success/warning/error/info colors exist in the CSS, they are NOT FOUND (the previous semantic-colors exception was deleted)
+- The final `:root` block must be VALID, PASTEABLE CSS. Unresolved tokens are commented out (`/* --token: NOT FOUND — verify manually */`) rather than emitted as broken declarations. NOT FOUND markers stay in the human-readable tables above; only the `:root` block is sanitized.
+- Output a complete design system covering: Color Palette (primary, secondary, neutrals, semantic, background, text), Typography (font families with CDN URLs, type scale), Spacing System, Borders & Radius, Shadows, Transitions, Breakpoints, Component Specs (buttons, card, navigation, footer), and a complete `:root` CSS tokens block.
 
-**Phase 4 — LLM Call B: Generate blueprint JSON (Claude claude-sonnet-4-6)**
-Sends the pre-processed, truncated HTML to Claude with the `BLUEPRINT_SYSTEM_PROMPT`. The output is a structured JSON object containing:
+**Phase 4 — LLM Call B: Generate blueprint JSON (Claude claude-sonnet-4-6, with screenshot + design.md)**
+Sends the pre-processed, truncated HTML, the full-page screenshot, AND the generated design.md to Claude with the `BLUEPRINT_SYSTEM_PROMPT`. The design.md is passed as additional context so the blueprint can use resolved color tokens to populate `background_color` and `text_color` with real hex values instead of null.
+
+Additional blueprint rules added:
+- Do NOT create separate sections for responsive variants of the same component. A desktop carousel and a mobile grid showing the same content is ONE section — record mobile behavior in `mobile_layout` and `layout_contract`.
+- Never truncate `body_text` mid-word. Include complete text, or cut at a sentence boundary and append ` […]`.
+- `cta_buttons` must list every button, link-styled-as-button, and primary action. An empty array means the section genuinely has none — check the screenshot before returning empty.
+
+The output is a structured JSON object containing:
 - `globals`: navigation (type, logo, links, CTA, background) and footer (columns, logo, social, newsletter, background)
 - `sections[]`: one entry per page section in order, each with: `section_index`, `section_name`, `section_type` (enum), `headline`, `subheadline`, `body_text`, `cta_buttons`, `media`, `background_color`, `text_color`, `estimated_height_desktop`
 - `layout_contract` per section: a 12-field structural intelligence object with `section_role`, `desktop_layout`, `mobile_layout`, `column_structure`, `content_position`, `image_position`, `card_or_grid_structure`, `alignment_rules`, `spacing_density`, `must_preserve`, `allowed_simplifications`, and `do_not_do`
@@ -1170,20 +1190,26 @@ Sends the pre-processed, truncated HTML to Claude with the `BLUEPRINT_SYSTEM_PRO
 The extraction UI shows:
 - URL input and "Extract Design" button (triggers API key modal if no key is stored)
 - A live progress bar with per-phase status indicators (pending / active spinner / done checkmark)
-- On completion: full-page screenshot preview, collapsible Firecrawl extract JSON panel, and two output panels (`design.md` and Blueprint JSON) each with Copy and Download buttons
+- On completion: full-page screenshot preview, and two output panels (`design.md` and Blueprint JSON) each with Copy and Download buttons
 - A "Download Both Files" button that triggers sequential downloads of both output files
+
+> Note: The collapsible Firecrawl extract JSON panel was removed when the `extract` format was dropped (2026-07-23).
 
 ### Files
 
 | File | Purpose |
 |------|---------|
 | `src/components/DesignExtractor.tsx` | Main extraction component |
-| `src/lib/htmlPreprocess.ts` | Five-step HTML cleaning pipeline |
+| `src/lib/htmlPreprocess.ts` | Five-step HTML cleaning pipeline (unchanged) |
 | `src/lib/prompts/designExtractionPrompts.ts` | System prompts and user message builders for both LLM calls |
+| `src/lib/callClaude.ts` | Claude API wrapper — added `imageBase64` param and `screenshotToBase64()` helper |
 
 ### Design Decisions
 
-- **Two separate Firecrawl scrape calls** are intentional: Call A uses the `extract` format (LLM-powered structured data extraction) while Call B uses `screenshot@fullPage` — these cannot be combined in a single call without losing one of the outputs.
+- **Single Firecrawl scrape call** (updated 2026-07-23): The previous two-call design (extract + screenshot) was collapsed into one call with `rawHtml` + `screenshot@fullPage`. The `extract` format was removed because Firecrawl's LLM extract fabricated values (Bootstrap defaults, wrong fonts) that were already available deterministically in the CSS.
+- **Screenshot sent to Claude vision**: The full-page screenshot is converted to base64 and passed to both Claude calls as an image content block. `src/lib/callClaude.ts` accepts an optional `imageBase64` parameter; `screenshotToBase64()` handles URL-to-base64 conversion (with a `data:` URI fast path) and degrades gracefully — if the fetch fails, the LLM call proceeds without the image.
+- **design.md chained into blueprint call**: The design.md generated by Call A is passed as context to Call B so the blueprint can use resolved color tokens for `background_color` and `text_color` instead of null.
+- **Rule 0 — no fabrication**: The design prompt now has an absolute prohibition on inventing values. Type scale inference (H1=48px etc.) and semantic color defaults were deleted. The `:root` block is sanitized to valid CSS — unresolved tokens are commented out.
 - **HTML pre-processing before LLM** is critical: strips ~60–80% of token-wasting noise while preserving the font CDN links that would otherwise be lost with the `<link>` tags.
 - **Font CDN placeholder trick** preserves font loading URLs through the stripping step without requiring a separate font-detection pass.
 - **Head + tail truncation** (not middle truncation) preserves the `<head>` (font links, meta) and the end of `<body>` (footer) which are typically the most information-dense regions for design extraction.
