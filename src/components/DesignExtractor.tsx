@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
 import { callFirecrawl } from '../lib/firecrawl';
-import { callClaude, screenshotToBase64 } from '../lib/callClaude';
+import { callClaude } from '../lib/callClaude';
+import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
   DESIGN_SYSTEM_PROMPT,
@@ -23,6 +24,7 @@ interface ExtractionResult {
   designMd: string;
   blueprintJson: string;
   screenshot: string | null;
+  screenshotAvailable: boolean;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -157,21 +159,21 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Phase 2: Pre-process HTML
       const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
 
-      // Convert screenshot to base64 for Claude vision (if it's a URL)
-      let screenshotBase64: string | null = null;
+      // Prepare screenshot segments for Claude vision
+      let screenshotSegments: string[] = [];
       if (screenshot) {
-        screenshotBase64 = await screenshotToBase64(screenshot);
+        screenshotSegments = await prepareScreenshot(screenshot);
       }
 
-      // Phase 3: LLM Call A — design.md (with screenshot)
+      // Phase 3: LLM Call A — design.md (with screenshot segments)
       setPhase('llm-design', 'Generating design.md with Claude...', 35);
       const designUserPrompt = buildDesignUserPrompt(cssBlocks, inlineStyles);
-      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotBase64 ?? undefined);
+      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
-      // Phase 4: LLM Call B — blueprint JSON (with screenshot + design.md as context)
+      // Phase 4: LLM Call B — blueprint JSON (with screenshot segments + design.md as context)
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 70);
       const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd);
-      const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotBase64 ?? undefined);
+      const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
       // Attempt to parse and re-stringify for clean JSON
       let blueprintJson = blueprintRaw.trim();
@@ -184,7 +186,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot });
+      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0 });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -311,6 +313,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
                 </span>
               </div>
               <img src={result.screenshot} alt="Page screenshot" className="w-full object-cover max-h-64" />
+            </div>
+          )}
+
+          {/* No-screenshot notice */}
+          {result.screenshot && !result.screenshotAvailable && (
+            <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Verificación visual no disponible — el análisis se basó únicamente en el CSS.</span>
             </div>
           )}
 

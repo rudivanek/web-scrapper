@@ -22,7 +22,11 @@ Rule 0 has no exceptions anywhere in this prompt. If any later instruction appea
 
 ## SCREENSHOT USAGE
 
-You are given a full-page screenshot alongside the CSS. Use it to VERIFY and DISAMBIGUATE, never to invent. Specifically:
+You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
+
+Treat the segments as one continuous page. Do not report a section twice because it appears in the overlap region. Do not assume content is missing from the page merely because it is absent from the segments.
+
+Use the screenshot to VERIFY and DISAMBIGUATE, never to invent. Specifically:
 - When multiple CSS rules could apply, the screenshot decides which renders
 - Confirm which sections are dark vs light vs off-white
 - Confirm the real visual hierarchy of H1 vs H2 vs H3 (relative size and weight)
@@ -300,7 +304,9 @@ export const BLUEPRINT_SYSTEM_PROMPT = `You are a precise web page structure ana
 
 You are given the design.md generated from this same page. Use its resolved color tokens to populate each section's background_color and text_color with real hex values instead of null. If a section's background cannot be determined from design.md or the screenshot, use null — do not guess.
 
-You are also given a full-page screenshot of the rendered page. Use it to verify section boundaries, visual hierarchy, and which elements are actually visible to users.
+You are also given a full-page screenshot of the rendered page. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete. Treat the segments as one continuous page — do not report a section twice because it appears in the overlap region, and do not assume content is missing from the page merely because it is absent from the segments.
+
+Use the screenshot to verify section boundaries, visual hierarchy, and which elements are actually visible to users.
 
 Do NOT create separate sections for responsive variants of the same component. If a desktop carousel and a mobile grid show the same content, that is ONE section — record the mobile behavior in mobile_layout and layout_contract. Sections are distinct content blocks, not breakpoint variants.
 
