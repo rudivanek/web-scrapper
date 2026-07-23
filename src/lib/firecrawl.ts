@@ -247,7 +247,20 @@ export interface CssExtractResult {
   rawCss: Record<string, string>;
 }
 
-export async function extractCssData(pageUrl: string): Promise<CssExtractResult | null> {
+export interface CssDiagnostics {
+  htmlSource: 'provided' | 'fetched';
+  linkedSheetsFound: number;
+  sheetsFetchedOk: number;
+  sheetsFailed: Array<{ url: string; reason: string }>;
+  totalCssBytes: number;
+  customPropertyCount: number;
+}
+
+export interface CssExtractResultWithDiagnostics extends CssExtractResult {
+  diagnostics: CssDiagnostics;
+}
+
+export async function extractCssData(pageUrl: string, html?: string): Promise<CssExtractResultWithDiagnostics | null> {
   try {
     const res = await fetch(
       `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-css`,
@@ -257,11 +270,11 @@ export async function extractCssData(pageUrl: string): Promise<CssExtractResult 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ url: pageUrl }),
+        body: JSON.stringify({ url: pageUrl, ...(html ? { html } : {}) }),
       }
     );
     if (!res.ok) return null;
-    return await res.json() as CssExtractResult;
+    return await res.json() as CssExtractResultWithDiagnostics;
   } catch {
     return null;
   }

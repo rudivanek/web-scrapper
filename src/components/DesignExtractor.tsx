@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
-import { callFirecrawl, extractCssData, type CssExtractResult } from '../lib/firecrawl';
+import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics } from '../lib/firecrawl';
 import { callClaude } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
@@ -26,6 +26,7 @@ interface ExtractionResult {
   screenshot: string | null;
   screenshotAvailable: boolean;
   externalSheets: number;
+  cssDegraded: boolean;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ function hostname(url: string): string {
 const MAX_COMBINED_CSS = 120000;
 
 function buildCombinedCss(
-  cssData: CssExtractResult | null,
+  cssData: CssExtractResultWithDiagnostics | null,
   cssBlocks: string[],
   inlineStyles: string[]
 ): string {
@@ -59,11 +60,32 @@ function buildCombinedCss(
   const groups: Array<{ header: string; lines: string[]; canTruncate: boolean }> = [];
 
   if (cssData) {
-    groups.push({
-      header: 'External stylesheet custom properties',
-      lines: dedupe(cssData.customProperties.map(p => `${p.selector} { ${p.name}: ${p.value}; }`)),
-      canTruncate: false,
-    });
+    const elementorProps = dedupe(
+      cssData.customProperties
+        .filter(p => /\.elementor-kit-\d+/.test(p.selector))
+        .map(p => `${p.selector} { ${p.name}: ${p.value}; }`)
+    );
+    const rootProps = dedupe(
+      cssData.customProperties
+        .filter(p => (p.selector === ':root' || p.selector === 'html') && !/\.elementor-kit-\d+/.test(p.selector))
+        .map(p => `${p.selector} { ${p.name}: ${p.value}; }`)
+    );
+    const otherProps = dedupe(
+      cssData.customProperties
+        .filter(p => p.selector !== ':root' && p.selector !== 'html' && !/\.elementor-kit-\d+/.test(p.selector))
+        .map(p => `${p.selector} { ${p.name}: ${p.value}; }`)
+    );
+
+    if (elementorProps.length > 0) {
+      groups.push({ header: 'Elementor kit custom properties (PRIMARY design system)', lines: elementorProps, canTruncate: false });
+    }
+    if (rootProps.length > 0) {
+      groups.push({ header: ':root custom properties', lines: rootProps, canTruncate: false });
+    }
+    if (otherProps.length > 0) {
+      groups.push({ header: 'Other stylesheet custom properties', lines: otherProps, canTruncate: false });
+    }
+
     groups.push({
       header: 'External stylesheet font declarations',
       lines: dedupe(cssData.fonts.map(f => `${f.selector} { ${f.property}: ${f.value}; }`)),
@@ -235,15 +257,19 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Phase 2: Pre-process HTML
       const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
 
-      // Phase 3: Fetch external stylesheets
+      // Phase 3: Fetch external stylesheets (pass Firecrawl's rawHtml to avoid a separate fetch)
       setPhase('fetch-css', 'Descargando hojas de estilo externas...', 25);
-      let cssData: CssExtractResult | null = null;
+      let cssData: CssExtractResultWithDiagnostics | null = null;
       try {
-        cssData = await extractCssData(normalized);
+        cssData = await extractCssData(normalized, rawHtml || undefined);
       } catch (e) {
         console.warn('extractCssData failed, continuing with inline CSS only:', e);
       }
+      if (cssData?.diagnostics) {
+        console.log('[extract-css] diagnostics:', cssData.diagnostics);
+      }
       const externalSheets = cssData?.sheets?.length ?? 0;
+      const cssDegraded = !cssData || cssData.diagnostics.sheetsFetchedOk === 0 || cssData.diagnostics.customPropertyCount === 0 || cssData.diagnostics.sheetsFailed.some(f => f.reason === 'html-response (likely WAF block)');
       const combinedCss = buildCombinedCss(cssData, cssBlocks, inlineStyles);
 
       // Prepare screenshot segments for Claude vision
@@ -273,7 +299,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets });
+      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -413,10 +439,18 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           )}
 
           {/* No external sheets notice */}
-          {result.externalSheets === 0 && (
+          {result.externalSheets === 0 && !result.cssDegraded && (
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>No se pudieron descargar hojas de estilo externas — el análisis se basó solo en los estilos incrustados.</span>
+            </div>
+          )}
+
+          {/* CSS extraction degraded warning */}
+          {result.cssDegraded && (
+            <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Advertencia: no se pudieron leer las hojas de estilo del sitio (posible bloqueo del servidor). El análisis de diseño está incompleto — verifica los valores manualmente.</span>
             </div>
           )}
 

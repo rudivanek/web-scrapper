@@ -6,6 +6,17 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+function fetchHeaders(pageUrl: string): Record<string, string> {
+  return {
+    "User-Agent": BROWSER_UA,
+    "Accept": "text/css,*/*;q=0.1",
+    "Referer": pageUrl,
+  };
+}
+
 interface CssCustomProperty {
   name: string;
   value: string;
@@ -41,6 +52,20 @@ interface CssSheet {
   isInline: boolean;
 }
 
+interface SheetFailure {
+  url: string;
+  reason: string;
+}
+
+interface CssDiagnostics {
+  htmlSource: "provided" | "fetched";
+  linkedSheetsFound: number;
+  sheetsFetchedOk: number;
+  sheetsFailed: SheetFailure[];
+  totalCssBytes: number;
+  customPropertyCount: number;
+}
+
 export interface CssExtractResult {
   customProperties: CssCustomProperty[];
   colors: CssColorValue[];
@@ -49,6 +74,7 @@ export interface CssExtractResult {
   mediaQueries: CssMediaQuery[];
   sheets: CssSheet[];
   rawCss: Record<string, string>;
+  diagnostics: CssDiagnostics;
 }
 
 function toAbsolute(href: string, origin: string, base: string): string {
@@ -62,8 +88,35 @@ function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-function extractCustomProperties(css: string, sheetUrl: string, results: CssCustomProperty[]) {
-  // Match selector blocks containing --variables
+function isWpPreset(name: string): boolean {
+  return name.startsWith("--wp--preset--");
+}
+
+function isWpStyleGlobal(name: string): boolean {
+  return name.startsWith("--wp--style--global--");
+}
+
+function shouldKeepCustomProperty(name: string): boolean {
+  if (isWpPreset(name)) return false;
+  return true;
+}
+
+function customPropertyPriority(selector: string): number {
+  if (/\.elementor-kit-\d+/.test(selector)) return 0;
+  if (selector === ":root" || selector === "html") return 1;
+  if (/^\.(theme|site|wp-site)/.test(selector)) return 2;
+  return 3;
+}
+
+function sortCustomProperties(props: CssCustomProperty[]): CssCustomProperty[] {
+  const groups: CssCustomProperty[][] = [[], [], [], []];
+  for (const p of props) {
+    groups[customPropertyPriority(p.selector)].push(p);
+  }
+  return [...groups[0], ...groups[1], ...groups[2], ...groups[3]];
+}
+
+function extractCustomProperties(css: string, _sheetUrl: string, results: CssCustomProperty[]) {
   const blockRe = /([^{}]+)\{([^{}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = blockRe.exec(css)) !== null) {
@@ -72,8 +125,10 @@ function extractCustomProperties(css: string, sheetUrl: string, results: CssCust
     const propRe = /(--[\w-]+)\s*:\s*([^;]+);/g;
     let p: RegExpExecArray | null;
     while ((p = propRe.exec(body)) !== null) {
+      const name = p[1].trim();
+      if (!shouldKeepCustomProperty(name)) continue;
       results.push({
-        name: p[1].trim(),
+        name,
         value: p[2].trim(),
         selector: selector.length > 120 ? selector.slice(0, 120) + "…" : selector,
       });
@@ -140,15 +195,12 @@ function extractFonts(css: string, results: CssFontDeclaration[], seen: Set<stri
 }
 
 function extractKeyframes(css: string, results: CssKeyframe[], seen: Set<string>) {
-  const kfRe = /@(?:-\w+-)?keyframes\s+([\w-]+)\s*\{([\s\S]*?)(?=@(?:-\w+-)?keyframes|\s*$)/g;
-  // Simpler: match @keyframes blocks by counting braces
   const re = /@(?:-\w+-)?keyframes\s+([\w-]+)\s*\{/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(css)) !== null) {
     const name = m[1];
     if (seen.has(name)) continue;
     seen.add(name);
-    // Grab the block by brace counting
     let depth = 0;
     let start = m.index;
     let i = css.indexOf("{", start);
@@ -164,8 +216,6 @@ function extractKeyframes(css: string, results: CssKeyframe[], seen: Set<string>
     const raw = css.slice(start, end + 1);
     results.push({ name, raw: raw.length > 800 ? raw.slice(0, 800) + "\n…" : raw });
   }
-  // suppress unused var warning
-  void kfRe;
 }
 
 function extractMediaQueries(css: string, results: CssMediaQuery[], seen: Set<string>) {
@@ -175,7 +225,6 @@ function extractMediaQueries(css: string, results: CssMediaQuery[], seen: Set<st
     const query = m[1].trim();
     if (seen.has(query)) continue;
     seen.add(query);
-    // Grab block
     let depth = 0;
     let i = m.index + m[0].length - 1;
     const start = m.index;
@@ -221,7 +270,10 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { url: pageUrl } = await req.json();
+    const body = await req.json();
+    const pageUrl: string | undefined = body.url;
+    const providedHtml: string | undefined = body.html;
+
     if (!pageUrl || typeof pageUrl !== "string") {
       return new Response(JSON.stringify({ error: "url is required" }), {
         status: 400,
@@ -250,13 +302,23 @@ Deno.serve(async (req: Request) => {
 
     const sheets: CssSheet[] = [];
     const rawCss: Record<string, string> = {};
+    const sheetsFailed: SheetFailure[] = [];
+    let totalCssBytes = 0;
+    let htmlSource: "provided" | "fetched" = "provided";
 
-    // Fetch page HTML
-    const pageRes = await fetch(pageUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; CSSBot/1.0)" },
-      signal: AbortSignal.timeout(12_000),
-    });
-    const html = await pageRes.text();
+    // Determine HTML source
+    let html: string;
+    if (providedHtml && providedHtml.trim().length > 0) {
+      html = providedHtml;
+      htmlSource = "provided";
+    } else {
+      htmlSource = "fetched";
+      const pageRes = await fetch(pageUrl, {
+        headers: fetchHeaders(pageUrl),
+        signal: AbortSignal.timeout(12_000),
+      });
+      html = await pageRes.text();
+    }
 
     // Inline <style> blocks
     const styleBlocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)];
@@ -265,6 +327,7 @@ Deno.serve(async (req: Request) => {
       const label = `inline-${i + 1}`;
       sheets.push({ url: label, size: content.length, isInline: true });
       rawCss[label] = content.length > 50_000 ? content.slice(0, 50_000) + "\n/* truncated */" : content;
+      totalCssBytes += content.length;
       parseAllCss(content, pageUrl, acc);
     });
 
@@ -274,18 +337,30 @@ Deno.serve(async (req: Request) => {
     const linkHrefs2 = [...html.matchAll(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']stylesheet["']/gi)]
       .map(m => toAbsolute(m[1], origin, absBase));
     const cssUrls = [...new Set([...linkHrefs1, ...linkHrefs2])].filter(u => u.startsWith("http"));
+    const linkedSheetsFound = cssUrls.length;
+
+    let sheetsFetchedOk = 0;
 
     await Promise.allSettled(cssUrls.map(async (cssUrl) => {
       try {
         const cssRes = await fetch(cssUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; CSSBot/1.0)" },
+          headers: fetchHeaders(pageUrl),
           signal: AbortSignal.timeout(10_000),
         });
-        if (!cssRes.ok) return;
+        if (!cssRes.ok) {
+          sheetsFailed.push({ url: cssUrl, reason: `http-${cssRes.status}` });
+          return;
+        }
+        const contentType = cssRes.headers.get("content-type") ?? "";
+        if (!contentType.includes("css")) {
+          sheetsFailed.push({ url: cssUrl, reason: "html-response (likely WAF block)" });
+          return;
+        }
         const css = await cssRes.text();
-        const label = cssUrl;
+        sheetsFetchedOk++;
         sheets.push({ url: cssUrl, size: css.length, isInline: false });
-        rawCss[label] = css.length > 100_000 ? css.slice(0, 100_000) + "\n/* truncated */" : css;
+        rawCss[cssUrl] = css.length > 100_000 ? css.slice(0, 100_000) + "\n/* truncated */" : css;
+        totalCssBytes += css.length;
         parseAllCss(css, cssUrl, acc);
 
         // Follow @import one level deep
@@ -301,30 +376,59 @@ Deno.serve(async (req: Request) => {
         await Promise.allSettled(imports.map(async (importUrl) => {
           try {
             const impRes = await fetch(importUrl, {
-              headers: { "User-Agent": "Mozilla/5.0 (compatible; CSSBot/1.0)" },
+              headers: fetchHeaders(pageUrl),
               signal: AbortSignal.timeout(8_000),
             });
-            if (!impRes.ok) return;
+            if (!impRes.ok) {
+              sheetsFailed.push({ url: importUrl, reason: `http-${impRes.status}` });
+              return;
+            }
+            const impContentType = impRes.headers.get("content-type") ?? "";
+            if (!impContentType.includes("css")) {
+              sheetsFailed.push({ url: importUrl, reason: "non-css content-type" });
+              return;
+            }
             const impCss = await impRes.text();
+            sheetsFetchedOk++;
             sheets.push({ url: importUrl, size: impCss.length, isInline: false });
             rawCss[importUrl] = impCss.length > 50_000 ? impCss.slice(0, 50_000) + "\n/* truncated */" : impCss;
+            totalCssBytes += impCss.length;
             parseAllCss(impCss, importUrl, acc);
-          } catch { /* skip */ }
+          } catch (e) {
+            sheetsFailed.push({ url: importUrl, reason: e instanceof Error ? e.message : "fetch-error" });
+          }
         }));
-      } catch { /* skip */ }
+      } catch (e) {
+        const reason = e instanceof DOMException && e.name === "TimeoutError"
+          ? "timeout"
+          : e instanceof Error ? e.message : "fetch-error";
+        sheetsFailed.push({ url: cssUrl, reason });
+      }
     }));
 
     // Deduplicate custom properties (keep first occurrence per name+selector combo)
     const cpSeen = new Set<string>();
-    const customProperties = acc.customProperties.filter(cp => {
+    let customProperties = acc.customProperties.filter(cp => {
       const key = `${cp.selector}::${cp.name}`;
       if (cpSeen.has(key)) return false;
       cpSeen.add(key);
       return true;
     });
 
+    // Sort by design-system priority
+    customProperties = sortCustomProperties(customProperties);
+
     // Sort colors by frequency desc
     const colors = [...acc.colorMap.values()].sort((a, b) => b.count - a.count);
+
+    const diagnostics: CssDiagnostics = {
+      htmlSource,
+      linkedSheetsFound,
+      sheetsFetchedOk,
+      sheetsFailed,
+      totalCssBytes,
+      customPropertyCount: customProperties.length,
+    };
 
     const result: CssExtractResult = {
       customProperties,
@@ -334,6 +438,7 @@ Deno.serve(async (req: Request) => {
       mediaQueries: acc.mediaQueries,
       sheets,
       rawCss,
+      diagnostics,
     };
 
     return new Response(JSON.stringify(result), {
