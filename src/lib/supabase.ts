@@ -9,6 +9,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+export interface SitemapGap {
+  claimed: number;
+  found: number;
+  missing: string[];
+}
+
 export interface Crawl {
   id: string;
   user_id: string;
@@ -19,6 +25,9 @@ export interface Crawl {
   tags: string[] | null;
   tokens_used: number | null;
   tokens_cost: number | null;
+  discovery_method: string | null;
+  jsspa_manual: boolean | null;
+  sitemap_gap: SitemapGap | null;
   created_at: string;
   updated_at: string;
 }
@@ -78,5 +87,7 @@ export interface SavedItem {
   tags: string[] | null;
   tokens_used: number | null;
   tokens_cost: number | null;
+  discovery_method?: string | null;
+  sitemap_gap?: SitemapGap | null;
   created_at: string;
 }

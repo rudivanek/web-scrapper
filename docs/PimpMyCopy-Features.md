@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.11 | Last Updated: 2026-07-23T12:00:00Z -->
+<!-- Version: 1.12 | Last Updated: 2026-07-23T13:00:00Z -->
 
 ---
 
@@ -1292,3 +1292,78 @@ In the Crawled URLs section toolbar, a new **"Exclude empty/thin"** checkbox app
 | `src/components/seo-intelligence/ThinContentDetector.tsx` | React component — forwardRef with `runAnalysis`, `getResults`, `isLoading`, `exportToCSV` handle; config panel; in-progress bar; summary cards; expandable table |
 | `src/components/seo-intelligence/ModuleSelector.tsx` | Module registry — added `thincontent` entry (`requiresFullScrape: true`) |
 | `src/components/seo-intelligence/SEOIntelligence.tsx` | Wired: import, ref, state (including reset), run sequence, module name map, JSX card; `excludeThinPages` state + filtering in `startHtmlDownload`; checkbox in toolbar |
+
+---
+
+## Website Crawler — Discovery Telemetry Persistence
+
+**Added:** 2026-07-23
+**Migration:** `add_discovery_telemetry_to_crawls`
+**Components:** `src/components/Crawler.tsx`, `src/components/SavedCrawls.tsx`
+
+### Problem
+
+The four-tier discovery architecture (map, html-harvest, deep-crawl, reconciliation) introduced `discoveryMethod` and `sitemapGap` as in-memory state. These values were lost when the user navigated away or discarded a crawl. There was no way to review which discovery tier was used across past crawls, or how often the JS/SPA toggle was flipped on — making it impossible to decide the toggle's fate with data.
+
+### Migration (Part A)
+
+Three nullable columns were added to the `crawls` table via `add_discovery_telemetry_to_crawls`, each guarded with an `IF NOT EXISTS` check in a `DO $` block:
+
+| Column | Type | Description |
+|---|---|---|
+| `discovery_method` | text | Which tier produced the final URL list: `'map'`, `'html-harvest'`, or `'deep-crawl'`. NULL for crawls that predate the feature. |
+| `jsspa_manual` | boolean | `true` when the user manually flipped the JS/SPA toggle on. NULL for crawls that predate the feature. |
+| `sitemap_gap` | jsonb | `{ claimed: number, found: number, missing: string[] }` or null. Captures pages found on the site but not in the sitemap. |
+
+All three are nullable with no default. Existing rows stay NULL — correct, since they predate the feature. No RLS policies were added or modified; the existing crawls policies already scope by `user_id` and cover these columns.
+
+### Write on Every Crawl (Part B)
+
+In `handleCrawl()`, immediately after discovery and reconciliation complete and before `showSuccess()`, the crawl row is updated with telemetry:
+
+```typescript
+if (user && currentCrawlId) {
+  await supabase.from('crawls').update({
+    discovery_method: discoveryMethod,
+    jsspa_manual: jsSpa,
+    sitemap_gap: sitemapGap,
+    total_urls: results.length,
+    updated_at: new Date().toISOString(),
+  }).eq('id', currentCrawlId);
+}
+```
+
+Key decisions:
+1. **Write at crawl time, not save time.** `handleSave()` only runs when the user clicks Save; writing at crawl time captures every crawl including discarded ones.
+2. **Wrapped in try/catch.** A telemetry write failure is logged to `console.error` and never surfaces an error to the user or interrupts the crawl.
+3. **`handleSave()` unchanged.** It continues to set `name` and `total_urls` as before — that still runs when the user names and saves a crawl.
+
+### Surface in Saved Crawls (Part C)
+
+In `SavedCrawls.tsx`, `discovery_method` and `sitemap_gap` are included in the mapping from crawl rows to `SavedItem` objects. Each crawl row shows:
+
+1. **Discovery method badge** — a small neutral badge next to the existing type badge:
+   - `'map'` → `Sitemap`
+   - `'html-harvest'` → `Enlaces`
+   - `'deep-crawl'` → `Profundo`
+   - `null` → no badge rendered
+
+2. **Sitemap gap indicator** — if `sitemap_gap` is non-null and `sitemap_gap.missing.length > 0`, a small amber warning icon with the count is shown, with a tooltip: `"N página(s) no listadas en el sitemap"`.
+
+Both are visually minimal — diagnostic signals for the operator, not client-facing elements.
+
+### What Did Not Change (Part D)
+
+- The four-tier discovery logic itself
+- Existing token-tracking writes (`updateTokensInDatabase`)
+- The initial `crawls` insert at the top of `handleCrawl`
+- Any existing RLS policies
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `supabase/migrations/<timestamp>_add_discovery_telemetry_to_crawls.sql` | New migration — adds three nullable columns |
+| `src/lib/supabase.ts` | Added `SitemapGap` interface; added `discovery_method`, `jsspa_manual`, `sitemap_gap` to `Crawl` and `SavedItem` interfaces |
+| `src/components/Crawler.tsx` | Telemetry write in `handleCrawl()` after discovery completes |
+| `src/components/SavedCrawls.tsx` | Discovery method badge + sitemap gap warning indicator on each crawl row |

@@ -998,6 +998,21 @@ export function Crawler({ onSaveSuccess }: CrawlerProps) {
         setResults(urlList.slice(0, maxUrls).map((url: string) => ({ url })));
       }
 
+      // B1-B3: Persist discovery telemetry on every crawl (not just saved ones)
+      if (user && currentCrawlId) {
+        try {
+          await supabase.from('crawls').update({
+            discovery_method: discoveryMethod,
+            jsspa_manual: jsSpa,
+            sitemap_gap: sitemapGap,
+            total_urls: results.length,
+            updated_at: new Date().toISOString(),
+          }).eq('id', currentCrawlId);
+        } catch (telemetryErr) {
+          console.error('Failed to persist discovery telemetry:', telemetryErr);
+        }
+      }
+
       showSuccess('Crawl completed successfully!');
     } catch (err: any) {
       if (err.message !== 'Operation cancelled by user') {

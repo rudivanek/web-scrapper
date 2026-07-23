@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase, Crawl, SEOAnalysis, SavedItem } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../hooks/useNotification';
-import { Loader2, Trash2, Eye, Calendar, Link as LinkIcon, Search, Tag, Globe, Activity } from 'lucide-react';
+import { Loader2, Trash2, Eye, Calendar, Link as LinkIcon, Search, Tag, Globe, Activity, AlertTriangle } from 'lucide-react';
 
 interface SavedCrawlsProps {
   onViewCrawl: (crawlId: string, itemType: 'crawler' | 'seo') => void;
@@ -51,6 +51,8 @@ export function SavedCrawls({ onViewCrawl, refreshTrigger }: SavedCrawlsProps) {
         tags: crawl.tags,
         tokens_used: crawl.tokens_used,
         tokens_cost: crawl.tokens_cost,
+        discovery_method: crawl.discovery_method,
+        sitemap_gap: crawl.sitemap_gap,
         created_at: crawl.created_at,
       }));
 
@@ -281,6 +283,20 @@ export function SavedCrawls({ onViewCrawl, refreshTrigger }: SavedCrawlsProps) {
                     }`}>
                       {item.type === 'crawler' ? 'Website Crawler' : 'SEO Intelligence'}
                     </span>
+                    {item.type === 'crawler' && item.discovery_method && (
+                      <span className="px-2 py-1 text-xs font-medium bg-neutral-100 text-neutral-600">
+                        {item.discovery_method === 'map' ? 'Sitemap'
+                          : item.discovery_method === 'html-harvest' ? 'Enlaces'
+                          : item.discovery_method === 'deep-crawl' ? 'Profundo'
+                          : item.discovery_method}
+                      </span>
+                    )}
+                    {item.type === 'crawler' && item.sitemap_gap && item.sitemap_gap.missing && item.sitemap_gap.missing.length > 0 && (
+                      <span className="flex items-center space-x-1 text-xs text-amber-600" title={`${item.sitemap_gap.missing.length} página(s) no listadas en el sitemap`}>
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>{item.sitemap_gap.missing.length}</span>
+                      </span>
+                    )}
                   </div>
 
                   {item.tags && item.tags.length > 0 && (
