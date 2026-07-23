@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-gray-800;
+  }
+
+  body {
+    @apply font-mono bg-white text-gray-900;
+    font-family: 'Source Code Pro', monospace;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+@media print {
+  .no-export {
+    display: none !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  body {
+    background: white !important;
+    margin: 0;
+    padding: 0;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm 15mm 12mm 15mm;
+  }
+
+  .space-y-4 > * + * {
+    margin-top: 12px !important;
+  }
+
+  .bg-white.border.border-gray-200.rounded-lg {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #summary {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Preserve jargon explanations in print */
+  .jargon-explanation,
+  span.jargon-explanation {
+    color: #6B7280 !important;
+    font-size: 0.85em !important;
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "runner": {
+    "command": "npm run dev"
+  }
+}

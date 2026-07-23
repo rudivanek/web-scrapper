@@ -1,0 +1,8 @@
+[functions.run-cro-audit]
+verify_jwt = false
+
+[functions.run-seo-audit]
+verify_jwt = false
+
+[functions.run-copy-analysis]
+verify_jwt = false
