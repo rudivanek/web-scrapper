@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.18 | Last Updated: 2026-07-24T00:30:00Z -->
+<!-- Version: 1.19 | Last Updated: 2026-07-24T01:00:00Z -->
 
 ---
 
@@ -1264,6 +1264,12 @@ The following rules were added to the `DESIGN_SYSTEM_PROMPT` in `src/lib/prompts
 10. **Report whether a coherent type scale exists.** If sizes are arbitrary per-class values with no consistent ratio, state so explicitly: "No systematic type scale — sizes are set per-class with no consistent ratio. This is typical of visual page builders and makes the site harder to maintain." This is a real audit finding, not an extraction failure. Previously, the prompt would either fabricate a scale or report NOT FOUND, neither of which communicated the actual situation.
 
 11. **Spacing table consolidation.** The same consolidation rule applies to the Spacing table: group the most-used values into a scale, cap at 10 rows, and note when no consistent scale exists. Previously, the spacing table would list every distinct padding/margin value found, producing an inventory rather than a scale.
+
+12. **Do not diagnose the cause of a gap.** When a value is missing, report that it is missing — do not speculate about why. Never write that values are "set inline", "not captured in the extracted CSS", "loaded via JavaScript", or "not included in the provided CSS" unless there is specific evidence in the supplied context. The model cannot see what was not sent to it, so it cannot know why something is absent. Write "NOT FOUND — verify manually" and stop. Previously, the prompt would fabricate explanations for missing values, giving users false confidence that the gap was understood.
+
+13. **Large CSS volume means search harder.** The prompt is told how many stylesheets were fetched and their total size. When a large volume of CSS was supplied and a common property still appears absent, that is a signal the model has not looked hard enough — it must search the frequency analysis before concluding the property is missing. Previously, the prompt would report NOT FOUND for properties that were present in the supplied CSS but not found by the model.
+
+14. **No consistent scale vs no values.** A site can declare hundreds of padding values with no systematic rhythm — that is a finding about the design system, not the same as the values being absent. The two must not be conflated. "No consistent scale" means the values exist but have no ratio; "no values" means the property was never declared. Previously, the prompt would report NOT FOUND when hundreds of values existed but had no pattern, confusing a design-system finding with an extraction gap.
 
 ---
 

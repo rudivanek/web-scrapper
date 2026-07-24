@@ -67,6 +67,12 @@ This is a real finding for the audit report, not a failure of extraction.
 
 Apply the same consolidation rule to the Spacing table: group the most-used values into a scale, cap at 10 rows, and note when no consistent scale exists.
 
+When a value is missing, report that it is missing. Do NOT speculate about WHY. Never write that values are 'set inline', 'not captured in the extracted CSS', 'loaded via JavaScript', or 'not included in the provided CSS' unless you can point to specific evidence in the supplied context. You cannot see what was not sent to you, so you cannot know why something is absent. Write 'NOT FOUND — verify manually' and stop.
+
+You are told how many stylesheets were fetched and their total size. When a large volume of CSS was supplied and a common property still appears absent, that is a signal you have not looked hard enough — search the frequency analysis before concluding the property is missing.
+
+Distinguish 'no consistent SCALE' from 'no VALUES'. A site can declare hundreds of padding values with no systematic rhythm. That is a finding about the design system. It is NOT the same as the values being absent, and the two must not be conflated.
+
 ## SCREENSHOT USAGE
 
 You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
