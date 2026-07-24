@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.20 | Last Updated: 2026-07-24T02:00:00Z -->
+<!-- Version: 1.21 | Last Updated: 2026-07-24T03:00:00Z -->
 
 ---
 
@@ -1374,6 +1374,36 @@ Added to `DESIGN_SYSTEM_PROMPT`:
 16. **Never populate token tables with rare one-off values.** A value used once on a marquee at a single breakpoint is not a spacing token. Rank by frequency and report dominant values. If the frequency analysis is empty, write NOT FOUND.
 
 17. **Tailwind utility classes are the design system.** Reconstruct tokens from Tailwind classes: `bg-slate-900` means the Tailwind slate-900 value, `text-lg` means the Tailwind lg font-size. Resolving default Tailwind scale names to their standard values is resolution, not fabrication. Arbitrary bracket values are literal and take priority over scale names. If a custom theme extension is evident from non-standard class names, report the class name and mark the value NOT FOUND — verify manually.
+
+18. **Declared but unreferenced custom properties are not brand evidence.** A CSS custom property that is declared but never referenced by any rule is NOT evidence of the brand palette. Before assigning --color-primary, check whether the candidate is actually applied to visible elements, and cross-check against the screenshot. A color used on headings, logo, and CTAs outranks an unused :root declaration, even though the latter looks more 'official'. When a declared variable appears unused, report it in the Usage column as 'declared but not referenced in any rule — verify'.
+
+#### Platform Detection Hardening (2026-07-24)
+
+**Added:** 2026-07-24 — Fixed false Tailwind detection on Webflow sites and strengthened the detection logic.
+
+**Problem:** tangan.fr (a Webflow site) was detected as `cms: null, cssApproach: 'tailwind'` because Webflow's platform classes (`.w-container`, `.w-nav`, `.w-form`, etc.) all begin with `w-`, which collided with the Tailwind width-utility prefix in the detection regex. The Webflow signal also failed to fire despite `.w-*` classes being present in the CSS.
+
+**Fix 1 — Removed `w-` and `h-` from the Tailwind prefix list.** These prefixes are too collision-prone. The remaining prefixes are sufficient: `^(bg|text|border|rounded|px|py|pt|pb|pl|pr|mx|my|mt|mb|ml|mr|flex|grid|gap)-`.
+
+**Fix 2 — Require a Tailwind scale-name match, not just a prefix.** A class only counts toward the Tailwind score if its suffix is a valid Tailwind token:
+- A number: `0`, `0.5`, `1`, `1.5`, `2`, `2.5`, `3`, `3.5`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`, `12`, `14`, `16`, `20`, `24`, `28`, `32`, `36`, `40`, `44`, `48`, `52`, `56`, `60`, `64`, `72`, `80`, `96`
+- A standard color name with an optional numeric step: `slate-900`, `red-500`, `white`, `black`, `transparent`
+- A standard size: `xs`, `sm`, `base`, `lg`, `xl`, `2xl`…`9xl`
+- Bracket syntax: `[...]`
+
+Classes like `font-30`, `mr-128`, `pt-24`, `mt-6vw` do NOT match the Tailwind scale and do not count.
+
+**Fix 3 — Order matters: detect CMS first.** If `cms === 'webflow' | 'wix' | 'squarespace'`, Tailwind is DISQUALIFIED — those builders emit their own utility-looking class names. The `cssApproach` is then set from custom-property count only.
+
+**Fix 4 — Fixed the Webflow signal.** The detection now matches on ANY of the following, checking BOTH the rendered HTML and the stylesheet text:
+- Meta generator containing "Webflow"
+- Asset host `website-files.com` OR `uploads-ssl.webflow.com`
+- The literal string `w-webflow-badge`
+- Two or more of: `.w-container`, `.w-nav`, `.w-form`, `.w-dyn-list`, `.w-slider`
+
+**Fix 5 — Raised the Tailwind bar to 40 matching classes** (from 20). Confidence is forced to `'low'` when the score is below 80.
+
+**Fix 6 — Added `warnings: string[]` to the detection result.** When two approaches both score above threshold, or when Tailwind signals are found but disqualified by the CMS, the conflict is recorded in `warnings` rather than silently picking one.
 
 #### Platform Section in design.md Output
 

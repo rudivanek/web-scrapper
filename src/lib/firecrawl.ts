@@ -268,6 +268,7 @@ export interface PlatformDetection {
   cssApproach: string;
   confidence: string;
   signals: string[];
+  warnings: string[];
 }
 
 export interface CssExtractResult {

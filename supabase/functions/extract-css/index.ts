@@ -90,6 +90,7 @@ interface PlatformDetection {
   cssApproach: string;
   confidence: string;
   signals: string[];
+  warnings: string[];
 }
 
 interface CssDiagnostics {
@@ -117,12 +118,50 @@ export interface CssExtractResult {
 
 // ─── Platform Detection ──────────────────────────────────────────────────────
 
+// Valid Tailwind scale-name suffixes that a utility class must match to count.
+// Numbers: 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 72, 80, 96
+const TW_NUMBER_RE = /^(0|0\.5|1|1\.5|2|2\.5|3|3\.5|4|5|6|7|8|9|10|11|12|14|16|20|24|28|32|36|40|44|48|52|56|60|64|72|80|96)$/;
+// Standard color names with optional numeric step
+const TW_COLOR_RE = /^(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(50|100|200|300|400|500|600|700|800|900|950)$/;
+// Standard sizes
+const TW_SIZE_RE = /^(xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl)$/;
+// Literal values: white, black, transparent, current, inherit, auto, full, none
+const TW_LITERAL_RE = /^(white|black|transparent|current|inherit|auto|full|none)$/;
+// Bracket syntax: [...]
+const TW_BRACKET_RE = /^\[.+\]$/;
+
+function isTailwindScaleSuffix(suffix: string): boolean {
+  return TW_NUMBER_RE.test(suffix) ||
+    TW_COLOR_RE.test(suffix) ||
+    TW_SIZE_RE.test(suffix) ||
+    TW_LITERAL_RE.test(suffix) ||
+    TW_BRACKET_RE.test(suffix);
+}
+
+// Count classes that match a Tailwind prefix AND have a valid scale-name suffix.
+function countTailwindClasses(html: string): number {
+  let count = 0;
+  const classMatches = html.matchAll(/class=["']([^"']+)["']/gi);
+  for (const cm of classMatches) {
+    const classes = cm[1].trim().split(/\s+/);
+    for (const cls of classes) {
+      // Must start with a known Tailwind prefix (excluding w- and h- which collide with Webflow)
+      const prefixMatch = cls.match(/^(bg|text|border|rounded|px|py|pt|pb|pl|pr|mx|my|mt|mb|ml|mr|flex|grid|gap)-(.+)$/);
+      if (!prefixMatch) continue;
+      const suffix = prefixMatch[2];
+      if (isTailwindScaleSuffix(suffix)) count++;
+    }
+  }
+  return count;
+}
+
 function detectPlatform(
   html: string,
   cssText: string,
   sheetUrls: string[],
 ): PlatformDetection {
   const signals: string[] = [];
+  const warnings: string[] = [];
   let cms: string | null = null;
   let builder: string | null = null;
   let framework: string | null = null;
@@ -131,12 +170,70 @@ function detectPlatform(
 
   const allCss = cssText;
   const allUrls = sheetUrls.join(" ");
+  const htmlAndCss = html + "\n" + allCss;
+
+  // ── CMS detection (runs first — order matters) ──
 
   // WordPress
   if (/wp-content\//.test(html) || /wp-includes\//.test(html) || /meta\s+name=["']generator["']\s+content=["']WordPress["']/i.test(html)) {
     cms = "wordpress";
     signals.push("wp-content/wp-includes paths or meta generator=WordPress");
   }
+
+  // Webflow — match on ANY of the following, checking BOTH HTML and CSS text:
+  //   - meta generator containing "Webflow"
+  //   - asset host website-files.com OR uploads-ssl.webflow.com
+  //   - the literal string "w-webflow-badge"
+  //   - two or more of: .w-container, .w-nav, .w-form, .w-dyn-list, .w-slider
+  {
+    let webflowScore = 0;
+    const webflowReasons: string[] = [];
+
+    if (/meta\s+name=["']generator["']\s+content=["']Webflow["']/i.test(html)) {
+      webflowScore += 2;
+      webflowReasons.push("meta generator=Webflow");
+    }
+    if (/website-files\.com/.test(allUrls) || /uploads-ssl\.webflow\.com/.test(allUrls)) {
+      webflowScore += 2;
+      webflowReasons.push("Webflow asset host (website-files.com or uploads-ssl.webflow.com)");
+    }
+    if (/w-webflow-badge/.test(htmlAndCss)) {
+      webflowScore += 2;
+      webflowReasons.push("w-webflow-badge string");
+    }
+
+    const wClasses = ["w-container", "w-nav", "w-form", "w-dyn-list", "w-slider"];
+    const matchedWClasses = wClasses.filter(c => new RegExp(`\\.${c}\\b`).test(htmlAndCss));
+    if (matchedWClasses.length >= 2) {
+      webflowScore += 2;
+      webflowReasons.push(`${matchedWClasses.length} Webflow platform classes: ${matchedWClasses.join(", ")}`);
+    }
+
+    if (webflowScore >= 2) {
+      cms = "webflow";
+      signals.push(`Webflow detected: ${webflowReasons.join("; ")}`);
+    }
+  }
+
+  // Wix
+  if (/static\.wixstatic\.com/.test(html) || /static\.wixstatic\.com/.test(allUrls)) {
+    cms = "wix";
+    signals.push("static.wixstatic.com asset host");
+  }
+
+  // Squarespace
+  if (/squarespace\.com\/universal/.test(html) || /static1\.squarespace\.com/.test(html) || /static1\.squarespace\.com/.test(allUrls)) {
+    cms = "squarespace";
+    signals.push("squarespace.com/universal or static1.squarespace.com");
+  }
+
+  // Shopify
+  if (/cdn\.shopify\.com/.test(html) || /cdn\.shopify\.com/.test(allUrls) || /Shopify\.theme/.test(html)) {
+    cms = "shopify";
+    signals.push("cdn.shopify.com or Shopify.theme");
+  }
+
+  // ── Builder detection ──
 
   // Elementor
   if (/\.elementor-kit-\d+/.test(html) || /elementor\/css\/post-/.test(html) || /class=["'][^"']*\belementor-/.test(html)) {
@@ -170,29 +267,7 @@ function detectPlatform(
     }
   }
 
-  // Webflow
-  if (/meta\s+name=["']generator["']\s+content=["']Webflow["']/i.test(html) || /website-files\.com/.test(allUrls) || /\.w-container\b/.test(html) || /\.w-form\b/.test(html) || /w-webflow-badge/.test(html)) {
-    cms = "webflow";
-    signals.push("Webflow meta generator, website-files.com host, or .w-* classes");
-  }
-
-  // Wix
-  if (/static\.wixstatic\.com/.test(html) || /static\.wixstatic\.com/.test(allUrls)) {
-    cms = "wix";
-    signals.push("static.wixstatic.com asset host");
-  }
-
-  // Squarespace
-  if (/squarespace\.com\/universal/.test(html) || /static1\.squarespace\.com/.test(html) || /static1\.squarespace\.com/.test(allUrls)) {
-    cms = "squarespace";
-    signals.push("squarespace.com/universal or static1.squarespace.com");
-  }
-
-  // Shopify
-  if (/cdn\.shopify\.com/.test(html) || /cdn\.shopify\.com/.test(allUrls) || /Shopify\.theme/.test(html)) {
-    cms = "shopify";
-    signals.push("cdn.shopify.com or Shopify.theme");
-  }
+  // ── Framework detection ──
 
   // Next.js
   if (/__NEXT_DATA__/.test(html) || /\/_next\/static\//.test(html)) {
@@ -220,16 +295,39 @@ function detectPlatform(
     }
   }
 
-  // CSS approach detection
+  // ── CSS approach detection ──
+  // ORDER MATTERS: CMS is already detected above. If the CMS is a hosted builder
+  // that emits its own utility-looking class names, Tailwind is DISQUALIFIED.
+  const tailwindDisqualified = cms === "webflow" || cms === "wix" || cms === "squarespace";
+
   const cpCount = (allCss.match(/--[\w-]+\s*:/g) ?? []).length;
   const hasTailwindVars = /--tw-/.test(allCss);
-  const twClassMatches = (html.match(/class=["'][^"']*\b(bg|text|border|rounded|px|py|mx|my|flex|grid|gap|w|h)-/g) ?? []).length;
+  const twClassCount = countTailwindClasses(html);
   const hasBootstrap = (/\.container\b/.test(allCss) && /\.row\b/.test(allCss) && /\.col-/.test(allCss)) || /btn\s+btn-/.test(html);
   const hasCssModules = /^[A-Za-z]+_[A-Za-z0-9]+__[a-z0-9]{5}$/m.test(html);
 
-  if (hasTailwindVars || twClassMatches >= 20) {
+  const tailwindScore = (hasTailwindVars ? 100 : 0) + twClassCount;
+
+  if (tailwindDisqualified) {
+    // Hosted builders emit their own utility classes — never call it Tailwind.
+    if (cpCount >= 15) {
+      cssApproach = "custom-properties";
+      signals.push(`${cpCount} CSS custom properties`);
+    } else {
+      cssApproach = "plain";
+      signals.push("No significant token layer detected (Tailwind disqualified by hosted CMS)");
+    }
+    if (hasTailwindVars || twClassCount >= 20) {
+      warnings.push(`Tailwind signals found (--tw- vars: ${hasTailwindVars}, ${twClassCount} scale-matched classes) but disqualified because cms=${cms}`);
+    }
+  } else if (tailwindScore >= 40) {
     cssApproach = "tailwind";
-    signals.push(hasTailwindVars ? "--tw- variables in CSS" : `${twClassMatches} Tailwind-style utility classes in HTML`);
+    if (hasTailwindVars) signals.push("--tw- variables in CSS");
+    if (twClassCount > 0) signals.push(`${twClassCount} Tailwind scale-matched utility classes in HTML`);
+    if (tailwindScore < 80) {
+      confidence = "low";
+      warnings.push(`Tailwind score ${tailwindScore} is below 80 — confidence lowered`);
+    }
   } else if (hasBootstrap) {
     cssApproach = "bootstrap";
     signals.push(".container/.row/.col- or btn btn- classes (Bootstrap)");
@@ -244,13 +342,15 @@ function detectPlatform(
     signals.push("No significant token layer detected");
   }
 
-  // Confidence
-  const signalCount = signals.length;
-  if (signalCount >= 3) confidence = "high";
-  else if (signalCount >= 1) confidence = "medium";
-  else confidence = "low";
+  // Confidence (only raise if not already set by tailwind low-score rule)
+  if (cssApproach !== "tailwind" || tailwindScore >= 80) {
+    const signalCount = signals.length;
+    if (signalCount >= 3) confidence = "high";
+    else if (signalCount >= 1) confidence = "medium";
+    else confidence = "low";
+  }
 
-  return { cms, builder, framework, cssApproach, confidence, signals };
+  return { cms, builder, framework, cssApproach, confidence, signals, warnings };
 }
 
 // ─── Frequency Analysis ──────────────────────────────────────────────────────

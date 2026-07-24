@@ -92,6 +92,8 @@ This is measurement, not fabrication. Never present a derived token as a declare
 
 NEVER populate a token table with rare or decorative one-off values just because they were the only ones visible. A value used once on a marquee at a single breakpoint is not a spacing token. Rank by frequency and report the dominant values. If the frequency analysis is empty, write NOT FOUND.
 
+A CSS custom property that is declared but never referenced by any rule is NOT evidence of the brand palette. Before assigning --color-primary, check whether the candidate is actually applied to visible elements, and cross-check against the screenshot. A color used on headings, logo, and CTAs outranks an unused :root declaration, even though the latter looks more 'official'. When a declared variable appears unused, report it in the Usage column as 'declared but not referenced in any rule — verify'.
+
 If the site uses Tailwind, the utility classes ARE the design system. Reconstruct tokens from them: bg-slate-900 means the Tailwind slate-900 value, text-lg means the Tailwind lg font-size. Resolving default Tailwind scale names to their standard values is resolution, not fabrication, because the scale is fixed and public. Arbitrary bracket values are literal and take priority over scale names. If a custom theme extension is evident from non-standard class names, report the class name and mark the value NOT FOUND — verify manually.
 
 ## SCREENSHOT USAGE
