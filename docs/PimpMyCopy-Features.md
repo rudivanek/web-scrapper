@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.16 | Last Updated: 2026-07-23T17:00:00Z -->
+<!-- Version: 1.17 | Last Updated: 2026-07-24T00:00:00Z -->
 
 ---
 
@@ -1236,6 +1236,24 @@ The extraction UI shows:
 - **Font CDN placeholder trick** preserves font loading URLs through the stripping step without requiring a separate font-detection pass.
 - **Head + tail truncation** (not middle truncation) preserves the `<head>` (font links, meta) and the end of `<body>` (footer) which are typically the most information-dense regions for design extraction.
 - **Blueprint `layout_contract`** captures structural intent (not just visual appearance) so the JSON can serve as a rebuild specification for a separate prototyping tool.
+
+### Prompt Accuracy Rules (2026-07-24)
+
+**Updated:** 2026-07-24 — Added six anti-fabrication and measurement rules to `DESIGN_SYSTEM_PROMPT` to fix specific failure modes observed in generated design.md files.
+
+The following rules were added to the `DESIGN_SYSTEM_PROMPT` in `src/lib/prompts/designExtractionPrompts.ts`:
+
+1. **No scale extrapolation from a single value.** If only one transition duration (e.g. `0.3s`) is found in the CSS, report that one and mark every other transition tier NOT FOUND. The same applies to spacing, radius, and type scales — never extrapolate a full scale (fast/base/slow or xs/sm/md/lg/xl) from a single data point. Previously, the prompt would emit `--transition-fast: 150ms` and `--transition-slow: 400ms` as confirmed values when only `0.3s` existed.
+
+2. **One token, one state.** A token is either resolved (give the value) or unresolved (NOT FOUND alone). Never emit both a value and NOT FOUND for the same token. If a value is visually evident but absent from CSS, write NOT FOUND in the value column and put the visual observation in the Usage column or a note. Previously, a `--radius-full` row would emit both `9999px` and `NOT FOUND — verify manually`.
+
+3. **ASSUMED marker for visual-only values.** When a value is visually confirmed but has no CSS source and the model chooses to supply it anyway, it must carry the `/* ASSUMED — reason */` marker. Values without that marker are claims that the value was found in the CSS.
+
+4. **Breakpoints derived from media query list.** The CSS context includes a `mediaQueries` array from `extract-css`. The Breakpoints table must be derived from it: collect every distinct `min-width` and `max-width` value, sort ascending, and report each with the number of rules using it as evidence (e.g. `| md | max-width: 767px | 214 rules |`). Report actual values found — do not map them onto assumed `sm/md/lg/xl` names. If a site's breakpoints do not map cleanly onto four tiers, list all of them. Report whether breakpoints are `min-width` (mobile-first) or `max-width` (desktop-first). Only report NOT FOUND if the media query list is genuinely empty. Previously, the Breakpoints table reported all NOT FOUND even though `extract-css` collected and passed the media query list.
+
+5. **CONFIRMED ABSENT vs NOT FOUND.** NOT FOUND means the value could not be determined. CONFIRMED ABSENT means the full CSS was searched and the property is never declared — in which case report the CSS initial value and mark it, e.g. `--radius-md: 0; /* CONFIRMED ABSENT — no border-radius declared anywhere */`. Use CONFIRMED ABSENT only when the complete stylesheet set is available and the property genuinely never appears. The token table and component specs must agree — never report NOT FOUND in one and a concrete value in the other. Previously, the token table would say NOT FOUND while component specs reported the CSS default (e.g. `border-radius: 0`).
+
+6. **One token, one value (no parenthetical scopes).** Never emit a token holding several values with parenthetical scopes (e.g. `--container-max: 960px (hero), 740px (method-tiers), 760px (philosophy p)`). When a property varies by context, emit separate scoped tokens (`--container-max-hero`, `--container-max-method`, `--container-max-prose`). If a dominant value exists, also emit the generic token set to it and note which sections deviate. Multi-value shorthand (e.g. `padding: 70px 60px 34px`) is acceptable as a token value only when declared that way in the CSS — keep the shorthand and note it is a shorthand rather than a single scalar.
 
 ---
 

@@ -38,6 +38,18 @@ Report whether breakpoints are min-width (mobile-first) or max-width (desktop-fi
 
 Only report NOT FOUND for breakpoints if the media query list is genuinely empty.
 
+Distinguish NOT FOUND from CONFIRMED ABSENT. NOT FOUND means you could not determine the value. CONFIRMED ABSENT means you searched the full CSS and the property is never declared — in which case report the CSS initial value and say so, e.g.
+  --radius-md: 0; /* CONFIRMED ABSENT — no border-radius declared anywhere */
+Use CONFIRMED ABSENT only when you have the complete stylesheet set and the property genuinely never appears. The token table and the component specs must agree; never report NOT FOUND in one and a concrete value in the other.
+
+One token, one value. Never emit a token holding several values with parenthetical scopes. When a property varies by context, emit separate scoped tokens:
+  --container-max-hero: 960px;
+  --container-max-method: 740px;
+  --container-max-prose: 760px;
+If a dominant value exists, also emit the generic token set to it and note which sections deviate.
+
+Multi-value shorthand is acceptable as a token value only when it is declared that way in the CSS (e.g. padding: 70px 60px 34px). Keep the shorthand, and note it is a shorthand rather than a single scalar.
+
 ## SCREENSHOT USAGE
 
 You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
