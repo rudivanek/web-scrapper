@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.22 | Last Updated: 2026-07-24T04:00:00Z -->
+<!-- Version: 1.23 | Last Updated: 2026-07-24T18:00:00Z -->
 
 ---
 
@@ -1454,6 +1454,99 @@ The platform detection, frequency analysis, and Tailwind utility data are inject
 **F. Contraste de color** (new top-level section, written in Spanish) — For every text-color / background-color pairing already identified in the document, computes the WCAG contrast ratio and reports pass/fail against 4.5:1 for normal text and 3:1 for large text. Rules: compute only for pairings actually documented above (no inventing pairings), skip any pairing where either colour is NOT FOUND, composite semi-transparent colours over the stated background first. Below the table, lists failures in plain Spanish a non-technical client can act on. This is arithmetic on values already extracted — not inference. Rule 0 still applies to the colours themselves.
 
 **What did NOT change:** Rule 0, NOT FOUND / CONFIRMED ABSENT conventions, type-scale consolidation, frequency-derived tokens with counts, the Platform section, or the `:root` block rules.
+
+### BUILD.md — Reconstruction Spec Export (2026-07-24)
+
+**Added:** 2026-07-24 — A third output file, `BUILD.md`, is now generated alongside `design.md` and `blueprint.json`. BUILD.md is a complete specification that an AI website builder (Bolt.new, Lovable, v0, Claude) can execute to reproduce the extracted page. Unlike design.md, which may contain `NOT FOUND` values, BUILD.md must contain NO unresolved values — every token gets a concrete, usable value.
+
+#### Prerequisites: Asset Manifest + Verbatim Text
+
+Two new data sources were added to make BUILD.md possible:
+
+**1. Asset Manifest** (`src/lib/assetExtractor.ts`)
+
+Before HTML cleaning, `extractAssetManifest(rawHtml, pageUrl)` runs in the browser via `DOMParser` and extracts:
+
+- **Logo**: first `<img>` inside `<header>`/`<nav>`, or any `<img>` with 'logo' in src/alt/class
+- **Favicon**: from `<link rel="icon">` / `<link rel="shortcut icon">` / `<link rel="apple-touch-icon">`
+- **og:image**: from `<meta property="og:image">`
+- **All `<img>` elements**: src, alt, width, height — with tracking pixels, spacer GIFs, and images under 32px in both dimensions filtered out
+- **CSS background images**: every `url()` from inline `style=` attributes and `<style>` blocks
+- **Inline SVGs**: count, plus any fill colors (excluding `none` and `currentColor`)
+
+All relative URLs are resolved to absolute against the page origin. The manifest is formatted by `formatAssetManifestForPrompt()` and injected into the blueprint LLM call as context.
+
+**2. Verbatim Text Blocks** (added to `BLUEPRINT_SYSTEM_PROMPT`)
+
+The blueprint prompt now instructs Claude to reproduce all visible text VERBATIM in its original language — headlines, subheads, body paragraphs, button labels, list items, form labels, nav items, footer text. A new per-section `text_blocks` array captures each text element with its semantic role (`h1`/`h2`/`h3`/`h4`/`paragraph`/`list_item`/`label`/`quote`/`button`) and verbatim content. The existing `headline`/`subheadline`/`body_text` fields are kept — the audit modules depend on them.
+
+A new top-level `global_assets` object (`logo`, `favicon`, `og_image`) is also added to the blueprint JSON.
+
+#### Phase 5 — LLM Call C: Generate BUILD.md
+
+After the blueprint call completes, a third Claude call (`claude-sonnet-4-6`, max_tokens 8000) generates BUILD.md using:
+- The completed `design.md`
+- The completed `blueprint.json` (with `text_blocks` and `assets`)
+- The screenshot segments
+
+The `BUILD_SPEC_SYSTEM_PROMPT` (`src/lib/prompts/buildSpecPrompt.ts`) instructs Claude to:
+
+- Replace every `NOT FOUND` value in design.md with a sensible default, marked with an `/* ASSUMED — reason */` inline comment
+- Derive assumptions in priority order: (1) visual evidence from screenshot, (2) consistency with extracted values, (3) common platform conventions — never from brand name or aesthetic taste
+- Carry `CONFIRMED ABSENT` values through as real findings, not assumptions
+- Reproduce all text VERBATIM from blueprint `text_blocks`
+- Use exact image URLs from blueprint `assets` — no placeholder substitutions
+- Respect every `layout_contract` `must_preserve` and `do_not_do` rule
+
+BUILD.md structure:
+1. **Overview** — page purpose, section count, detected stack
+2. **Tech Notes — Fonts** — exact loading method per font (Google Fonts `<link>`, `@font-face` URL, or custom/licensed with fallback)
+3. **tailwind.config.js Theme Extension** — fully populated JS object with colors, fontFamily, fontSize, spacing, borderRadius, screens (actual breakpoints from design.md, not remapped to Tailwind defaults; desktop-first noted explicitly)
+4. **Global CSS** — valid `:root` block, no NOT FOUND, no commented-out tokens
+5. **Section-by-Section Build Instructions** — layout contract, verbatim text_blocks, assets with absolute URLs, resolved colors
+6. **Component Specs** — every CSS property filled, all interactive states, ASSUMED markers where applicable
+7. **Assumptions to Verify** — consolidated table of every ASSUMED value with its reason
+
+A fixed header is prepended:
+
+> Generated from an automated extraction. Values marked ASSUMED were not found in the site's CSS and were inferred from the screenshot. Review the "Assumptions to verify" section before building.
+
+#### Build Target Selector
+
+A target selector appears above the results with two options:
+- **React / Tailwind** (default, active) — generates all three files
+- **WordPress + Elementor** (disabled, labeled "Próximamente")
+
+Only the React/Tailwind target produces BUILD.md output. The `buildTarget` state controls whether Phase 5 runs.
+
+#### Failure Handling
+
+If the BUILD.md Claude call fails, `design.md` and `blueprint.json` are still delivered. An amber notice appears: "BUILD.md no pudo generarse — design.md y blueprint.json están disponibles." The third file is additive and never breaks the first two.
+
+#### UI Changes
+
+- Progress bar now shows 5 phases (added: "Phase 5 — Generate BUILD.md")
+- A third output panel appears for BUILD.md with Copy and Download buttons (filename: `{site}-BUILD.md`)
+- A "Copiar todo para el builder" button copies a clipboard payload containing the builder instruction preamble, BUILD.md, and blueprint.json in a fenced code block
+- The "Download Both Files" button is now "Download All Files" and triggers sequential downloads of all available files
+- The header subtitle now mentions three outputs instead of two
+
+#### Files
+
+| File | Purpose |
+|------|---------|
+| `src/lib/assetExtractor.ts` | New — extracts asset manifest (logo, favicon, og:image, images, background images, SVGs) from raw HTML before cleaning; resolves all URLs to absolute |
+| `src/lib/prompts/buildSpecPrompt.ts` | New — `BUILD_SPEC_SYSTEM_PROMPT` and `buildBuildUserPrompt()` for the BUILD.md generation call |
+| `src/lib/prompts/designExtractionPrompts.ts` | Modified — added verbatim text instruction, `text_blocks` and `assets` arrays to blueprint schema, `global_assets` object, `assetManifest` parameter to `buildBlueprintUserPrompt()` |
+| `src/components/DesignExtractor.tsx` | Modified — imports, `BuildTarget` type, `buildTarget` state, asset extraction call, Phase 5 LLM call, build target selector UI, BUILD.md output panel, copy-all button, 5-phase progress bar |
+
+#### What Did NOT Change
+
+- `design.md` and `blueprint.json` remain canonical and target-agnostic — BUILD.md reads them but never alters extraction
+- Rule 0, NOT FOUND, CONFIRMED ABSENT conventions
+- Platform detection, frequency analysis, type-scale consolidation
+- The blueprint's null + `background_tone` behaviour
+- Screenshot segmentation and the screenshot passed to Claude
 
 ---
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callClaude } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
@@ -10,12 +10,16 @@ import {
   buildDesignUserPrompt,
   buildBlueprintUserPrompt,
 } from '../lib/prompts/designExtractionPrompts';
+import { BUILD_SPEC_SYSTEM_PROMPT, buildBuildUserPrompt } from '../lib/prompts/buildSpecPrompt';
+import { extractAssetManifest, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
+type BuildTarget = 'react-tailwind' | 'wordpress-elementor';
+
 interface ExtractionState {
-  phase: 'idle' | 'scrape-design' | 'scrape-structure' | 'fetch-css' | 'llm-design' | 'llm-blueprint' | 'done' | 'error';
+  phase: 'idle' | 'scrape-design' | 'scrape-structure' | 'fetch-css' | 'llm-design' | 'llm-blueprint' | 'llm-buildspec' | 'done' | 'error';
   message: string;
   progress: number; // 0–100
 }
@@ -23,11 +27,13 @@ interface ExtractionState {
 interface ExtractionResult {
   designMd: string;
   blueprintJson: string;
+  buildMd: string | null;
   screenshot: string | null;
   screenshotAvailable: boolean;
   externalSheets: number;
   cssDegraded: boolean;
   platform: PlatformDetection | null;
+  buildTarget: BuildTarget;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -227,6 +233,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [localApiKey, setLocalApiKey] = useState<string | null>(null);
+  const [buildTarget, setBuildTarget] = useState<BuildTarget>('react-tailwind');
 
   const resolvedKey = localApiKey || anthropicKey || null;
 
@@ -257,6 +264,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Phase 2: Pre-process HTML
       const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
+
+      // Phase 2b: Extract asset manifest from raw HTML (before cleaning)
+      const assetManifest = extractAssetManifest(rawHtml, normalized);
+      const assetManifestText = formatAssetManifestForPrompt(assetManifest);
 
       // Phase 3: Fetch external stylesheets (pass Firecrawl's rawHtml to avoid a separate fetch)
       setPhase('fetch-css', 'Descargando hojas de estilo externas...', 25);
@@ -290,9 +301,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind);
       const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
-      // Phase 5: LLM Call B — blueprint JSON (with screenshot segments + design.md as context)
+      // Phase 5: LLM Call B — blueprint JSON (with screenshot segments + design.md + asset manifest as context)
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 70);
-      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd);
+      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd, assetManifestText);
       const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
       // Attempt to parse and re-stringify for clean JSON
@@ -305,8 +316,21 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         blueprintJson = blueprintRaw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
       }
 
+      // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
+      let buildMd: string | null = null;
+      if (buildTarget === 'react-tailwind') {
+        setPhase('llm-buildspec', 'Generando especificación de reconstrucción (BUILD.md)...', 90);
+        try {
+          const buildUserPrompt = buildBuildUserPrompt(designMd, blueprintJson);
+          const buildRaw = await callClaude(apiKey, BUILD_SPEC_SYSTEM_PROMPT, buildUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
+          buildMd = buildRaw.trim();
+        } catch (e) {
+          console.warn('BUILD.md generation failed — delivering design.md and blueprint.json only:', e);
+        }
+      }
+
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform });
+      setResult({ designMd, blueprintJson, buildMd, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform, buildTarget });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -329,7 +353,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
     runExtraction(key);
   };
 
-  const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint'].includes(state.phase);
+  const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
   const site = hostname(url);
 
   const phases: Array<{ key: ExtractionState['phase']; label: string }> = [
@@ -337,6 +361,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
     { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
     { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
     { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON (Claude)' },
+    { key: 'llm-buildspec', label: 'Phase 5 — Generate BUILD.md (Claude)' },
   ];
 
   const currentPhaseIdx = phases.findIndex(p => p.key === state.phase);
@@ -354,7 +379,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       <div className="mb-8">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Design Extractor</h2>
         <p className="text-sm text-gray-500">
-          Two-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> and page blueprint JSON.
+          Three-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code>, page blueprint JSON, and <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">BUILD.md</code> reconstruction spec.
         </p>
       </div>
 
@@ -379,6 +404,30 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           ) : (
             <><Palette className="w-4 h-4" /><span>Extract Design</span></>
           )}
+        </button>
+      </div>
+
+      {/* Build target selector */}
+      <div className="mb-8 flex items-center gap-2">
+        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Build target:</span>
+        <button
+          onClick={() => setBuildTarget('react-tailwind')}
+          disabled={isRunning}
+          className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors disabled:opacity-50 ${
+            buildTarget === 'react-tailwind'
+              ? 'bg-gray-900 text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          React / Tailwind
+        </button>
+        <button
+          disabled
+          className="px-3 py-1.5 text-xs font-semibold rounded bg-gray-100 text-gray-400 cursor-not-allowed flex items-center gap-1.5"
+          title="Próximamente"
+        >
+          WordPress + Elementor
+          <span className="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">Próximamente</span>
         </button>
       </div>
 
@@ -530,17 +579,61 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             downloadMime="application/json"
           />
 
-          {/* Quick-download all */}
+          {/* BUILD.md output (only for React/Tailwind) */}
+          {result.buildTarget === 'react-tailwind' && result.buildMd && (
+            <OutputPanel
+              title="BUILD.md — Reconstruction Spec"
+              icon={<FileDown className="w-4 h-4" />}
+              content={result.buildMd}
+              filename={`${site}-BUILD.md`}
+              downloadMime="text/markdown"
+            />
+          )}
+
+          {/* BUILD.md generation failed notice */}
+          {result.buildTarget === 'react-tailwind' && !result.buildMd && (
+            <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>BUILD.md no pudo generarse — design.md y blueprint.json están disponibles.</span>
+            </div>
+          )}
+
+          {/* Quick-download all + copy for builder */}
           <div className="flex items-center justify-end gap-3 pt-2">
+            {result.buildMd && (
+              <button
+                onClick={() => {
+                  const payload = `Rebuild this website exactly as specified. BUILD.md defines the design system and section-by-section structure. blueprint.json defines layout contracts — respect every must_preserve and do_not_do rule. Use the exact text and image URLs provided. Do not redesign or improve anything.
+
+--- BUILD.md ---
+
+${result.buildMd}
+
+--- blueprint.json ---
+
+\`\`\`json
+${result.blueprintJson}
+\`\`\``;
+                  navigator.clipboard.writeText(payload);
+                }}
+                className="flex items-center space-x-2 px-5 py-2.5 bg-gray-700 text-white text-sm font-semibold hover:bg-gray-600 transition-colors rounded"
+              >
+                <Clipboard className="w-4 h-4" />
+                <span>Copiar todo para el builder</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 downloadFile(result.designMd, `${site}-design.md`, 'text/markdown');
                 setTimeout(() => downloadFile(result.blueprintJson, `${site}-blueprint.json`, 'application/json'), 300);
+                if (result.buildMd) {
+                  setTimeout(() => downloadFile(result.buildMd!, `${site}-BUILD.md`, 'text/markdown'), 600);
+                }
               }}
               className="flex items-center space-x-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 transition-colors rounded"
             >
               <FileDown className="w-4 h-4" />
-              <span>Download Both Files</span>
+              <span>Download All Files</span>
             </button>
           </div>
         </div>

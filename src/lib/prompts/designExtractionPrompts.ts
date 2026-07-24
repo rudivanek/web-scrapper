@@ -569,6 +569,8 @@ export const BLUEPRINT_SYSTEM_PROMPT = `You are a precise web page structure ana
 
 RULE 0 — NO FABRICATED VALUES. Never read hex color values off the screenshot. Screenshot pixels are compressed, colour-shifted, and often overlaid — a value sampled from them is a guess presented as a measurement. background_color and text_color may ONLY be populated from a hex value present in the supplied design.md or CSS. If design.md reports a value as NOT FOUND, the corresponding blueprint field MUST be null. Null is the correct answer. A plausible-looking hex that was never in the CSS is a defect.
 
+This blueprint is used to REBUILD the page. Reproduce all visible text VERBATIM in its original language — headlines, subheads, body paragraphs, button labels, list items, form labels, nav items, footer text. Do not summarise, translate, shorten, or improve any of it. If a section's text is long, include it in full anyway.
+
 Use the screenshot to determine STRUCTURE and RELATIVE properties only: how many sections exist, their order, layout, which are visually dark versus light, where images sit, how many columns. Never to determine exact values.
 
 If design.md reports a token as NOT FOUND, you must not supply a value for that same token anywhere in the blueprint. The two documents describe the same page and must never contradict each other.
@@ -592,6 +594,11 @@ Return ONLY valid JSON with this exact structure:
 {
   "url": "[scraped URL]",
   "page_title": "[page title from HTML]",
+  "global_assets": {
+    "logo": "absolute URL or null",
+    "favicon": "absolute URL or null",
+    "og_image": "absolute URL or null"
+  },
   "globals": {
     "navigation": {
       "type": "sticky|fixed|static",
@@ -617,6 +624,12 @@ Return ONLY valid JSON with this exact structure:
       "subheadline": "subheadline text or null",
       "body_text": "first 100 chars of body text or null",
       "cta_buttons": [{"text": "button text", "style": "primary|secondary|ghost"}],
+      "text_blocks": [
+        {"role": "h1|h2|h3|h4|paragraph|list_item|label|quote|button", "content": "verbatim text in original language"}
+      ],
+      "assets": [
+        {"url": "absolute URL", "alt": "alt text", "role": "hero|logo|card|icon|background"}
+      ],
       "media": {
         "has_image": true|false,
         "has_video": true|false,
@@ -652,7 +665,10 @@ Return ONLY valid JSON with this exact structure:
 - must_preserve and allowed_simplifications and do_not_do must each have at least 1 item
 - Extract actual text content for headline/subheadline/body_text when visible
 - background_tone is populated from the screenshot when the exact hex is unknown — it captures what the screenshot legitimately shows (dark/light/mid) without inventing precision
-- Return ONLY the JSON object, no markdown fences, no explanation`;
+- Return ONLY the JSON object, no markdown fences, no explanation
+- text_blocks is an ordered array of every visible text element in the section, each tagged with its semantic role (h1, h2, h3, h4, paragraph, list_item, label, quote, button). Reproduce the text verbatim — do not summarise or shorten.
+- assets is an array of image URLs that appear in this section, each with its alt text and a role (hero, logo, card, icon, background). Use the asset manifest provided in the user prompt to populate these. Match image URLs to sections by their position in the HTML.
+- global_assets contains the site-wide logo, favicon, and og:image URLs from the asset manifest.`;
 
 export function buildDesignUserPrompt(
   combinedCss: string,
@@ -704,14 +720,18 @@ ${hasCss ? combinedCss : '/* No CSS returned from any source */'}
 Generate the complete design.md file. Start with the Platform section using the detected values above. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }
 
-export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string): string {
+export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string, assetManifest?: string): string {
   const designContext = designMd
     ? `\n\nHere is the design.md generated from this same page. Use its resolved color tokens to populate background_color and text_color fields with real hex values:\n\n\`\`\`markdown\n${designMd}\n\`\`\``
     : '';
 
+  const assetContext = assetManifest
+    ? `\n\n${assetManifest}\n\nUse these absolute image URLs to populate the assets array for each section and the global_assets object. Match images to sections by their position and context in the HTML.`
+    : '';
+
   return `Here is the raw HTML from the webpage. Extract all sections and globals:
 
-${cleanedHtml}${designContext}
+${cleanedHtml}${designContext}${assetContext}
 
-Return a valid JSON object following the exact format in the system prompt. Include ALL sections in page order.`;
+Return a valid JSON object following the exact format in the system prompt. Include ALL sections in page order. Reproduce all visible text verbatim in the text_blocks arrays — do not summarise or shorten any text.`;
 }
