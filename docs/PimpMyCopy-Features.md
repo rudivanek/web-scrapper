@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.0 | Last Updated: 2026-07-24T21:00:00Z -->
+<!-- Version: 8.0 | Last Updated: 2026-07-24T21:30:00Z -->
 
 ---
 
@@ -1531,6 +1531,26 @@ After each Claude call, the API response `stop_reason` is checked. If it is `max
 If `stop_reason` is still `max_tokens` after 2 continuations, the segment is marked incomplete and a visible amber warning appears above the BUILD.md download card: "Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron." The file is still delivered — a partial BUILD.md is more useful than none. A truncated BUILD.md is never presented as a successful, complete run.
 
 The `callClaudeWithMeta()` function captures both the streamed text and the `stop_reason` from the `message_delta` SSE event. `callWithContinuation()` wraps it with the auto-continuation logic. The original `callClaude()` wrapper remains for backward compatibility with other callers.
+
+#### Section Completeness Verifier
+
+After the sections call(s) complete, the generated sections text is checked against the blueprint's `sections` array. The verifier reads each section's `section_index` and `section_name` from `blueprint.json` — it does NOT iterate array positions. A section counts as present if either its index (matched as "Section N", "section N", or "Sección N") OR its name appears in the generated text. This dual match prevents false positives from heading format drift.
+
+If sections are missing, the log reports all three sets for debugging:
+`[BUILD.md] expected: [...] found: [...] missing: [...]`
+The missing section indices are appended to the BUILD.md as an incomplete notice, and `buildMdIncomplete` is set to true.
+
+#### Section Index Normalization
+
+Before the sections call, `blueprint.json` is inspected for any `section_index` value of 0. If found, all section indices are normalized to 1-based (incrementing by 1 with no gaps), and a warning is logged: `[BUILD.md] Normalizing section_index values from 0-based to 1-based`. The normalized blueprint is then passed to the sections prompt.
+
+#### Section Numbering Pinned in Prompts
+
+Two constraints were added to prevent the issue recurring:
+
+1. **BLUEPRINT_SYSTEM_PROMPT** now states: "section_index MUST start at 1 and increment by 1 with no gaps. Never use 0. The navigation and footer are NOT sections — they belong in the `globals` object and must not appear in the sections array."
+
+2. **BUILD_SPEC_SECTIONS_PROMPT** now states: "Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections."
 
 #### Build Target Selector
 

@@ -660,6 +660,7 @@ Return ONLY valid JSON with this exact structure:
 
 ## RULES
 - Include ALL sections in page order — do not skip any
+- section_index MUST start at 1 and increment by 1 with no gaps. Never use 0. The navigation and footer are NOT sections — they belong in the \`globals\` object and must not appear in the sections array.
 - section_type must be one of the enum values listed
 - layout_contract must have all 12 fields filled — never leave null unless the field genuinely does not apply
 - must_preserve and allowed_simplifications and do_not_do must each have at least 1 item

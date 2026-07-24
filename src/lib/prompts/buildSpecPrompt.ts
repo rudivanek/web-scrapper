@@ -112,7 +112,8 @@ For each section in page order, provide:
 - Reproduce all visible text VERBATIM from blueprint.json text_blocks. Do not summarise, translate, shorten, or improve.
 - Use the exact image URLs from blueprint.json assets. Do not substitute placeholder images.
 - Respect every layout_contract must_preserve and do_not_do rule from blueprint.json.
-- Do not redesign or improve anything. This is a faithful reproduction spec.`;
+- Do not redesign or improve anything. This is a faithful reproduction spec.
+- Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections.`;
 
 export const BUILD_SPEC_COMPONENTS_PROMPT = `${CORE_FRAMING}
 

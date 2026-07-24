@@ -350,14 +350,21 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           let totalSections = 0;
           try {
             const bpParsed = JSON.parse(blueprintJson);
-            totalSections = Array.isArray(bpParsed.sections) ? bpParsed.sections.length : 0;
+            const bpSections: Array<{ section_index: number; section_name?: string }> = Array.isArray(bpParsed.sections) ? bpParsed.sections : [];
+            totalSections = bpSections.length;
+            // B3: Normalize any section_index of 0 to 1-based
+            if (bpSections.some(s => s.section_index === 0)) {
+              console.warn('[BUILD.md] Normalizing section_index values from 0-based to 1-based');
+              bpSections.forEach((s, i) => { s.section_index = i + 1; });
+              blueprintJson = JSON.stringify(bpParsed, null, 2);
+            }
           } catch { /* keep 0 */ }
 
           if (totalSections > 8) {
             const batchSize = 6;
             for (let s = 0; s < totalSections; s += batchSize) {
-              const startIdx = s;
-              const endIdx = Math.min(s + batchSize - 1, totalSections - 1);
+              const startIdx = s + 1;
+              const endIdx = Math.min(s + batchSize, totalSections);
               sectionBatchRanges.push({ start: startIdx, end: endIdx, total: totalSections });
             }
             for (const range of sectionBatchRanges) {
@@ -379,20 +386,25 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             }
           }
 
-          // B2: Verify every section index appears in the generated output
+          // B2: Verify every section from blueprint.json appears in the generated output
           if (totalSections > 0) {
-            const missingIndices: number[] = [];
-            for (let i = 0; i < totalSections; i++) {
-              // Check for common patterns: "Section 0", "section 0", "Sección 0", or just the index in context
-              if (!sectionsText.includes(`Section ${i}`) && !sectionsText.includes(`section ${i}`) && !sectionsText.includes(`Sección ${i}`) && !sectionsText.includes(`"index": ${i}`)) {
-                missingIndices.push(i);
+            try {
+              const bpParsed2 = JSON.parse(blueprintJson);
+              const bpSections: Array<{ section_index: number; section_name: string }> = Array.isArray(bpParsed2.sections) ? bpParsed2.sections : [];
+              const expected = bpSections.map(s => ({ index: s.section_index, name: s.section_name ?? '' }));
+              const found = expected.filter(e =>
+                sectionsText.includes(`Section ${e.index}`) ||
+                sectionsText.includes(`section ${e.index}`) ||
+                sectionsText.includes(`Sección ${e.index}`) ||
+                (e.name && sectionsText.includes(e.name))
+              );
+              const missing = expected.filter(e => !found.includes(e));
+              if (missing.length > 0) {
+                console.warn(`[BUILD.md] expected: [${expected.map(e => e.index).join(', ')}] found: [${found.map(e => e.index).join(', ')}] missing: [${missing.map(e => e.index).join(', ')}]`);
+                sectionsText += `\n\n> INCOMPLETO: las secciones ${missing.map(e => e.index).join(', ')} no se generaron. Vuelve a ejecutar.`;
+                buildMdIncomplete = true;
               }
-            }
-            if (missingIndices.length > 0) {
-              console.warn(`[BUILD.md] Missing section indices: ${missingIndices.join(', ')}`);
-              sectionsText += `\n\n> INCOMPLETO: las secciones ${missingIndices.join(', ')} no se generaron. Vuelve a ejecutar.`;
-              buildMdIncomplete = true;
-            }
+            } catch { /* skip verification if blueprint unparseable */ }
           }
 
           // Call 3: Components + Assumptions (sections 6–7)
