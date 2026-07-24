@@ -100,6 +100,8 @@ interface CssDiagnostics {
   sheetsFailed: SheetFailure[];
   totalCssBytes: number;
   customPropertyCount: number;
+  cssLooksInsufficient: boolean;
+  insufficientReasons: string[];
 }
 
 export interface CssExtractResult {
@@ -936,6 +938,52 @@ Deno.serve(async (req: Request) => {
       tailwind = extractTailwindUtilities(html);
     }
 
+    // ── Detect boot-only / insufficient CSS ──────────────────────────────
+    const insufficientReasons: string[] = [];
+    const htmlBodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const htmlBody = htmlBodyMatch ? htmlBodyMatch[1] : html;
+    const htmlBodyBytes = new TextEncoder().encode(htmlBody).length;
+
+    // A1: totalCssBytes < 60000 AND rendered HTML over 100KB
+    if (totalCssBytes < 60_000 && htmlBodyBytes > 100_000) {
+      insufficientReasons.push(`totalCssBytes=${totalCssBytes} < 60000 but HTML body is ${Math.round(htmlBodyBytes / 1024)}KB`);
+    }
+
+    // A2: customPropertyCount === 0 AND colors found < 8
+    if (customProperties.length === 0 && colors.length < 8) {
+      insufficientReasons.push(`no custom properties and only ${colors.length} colors found`);
+    }
+
+    // A3: over 60% of matched selectors scoped to loader/error/404 patterns
+    const BOOT_PATTERN_RE = /^#?_?404|^#lo|^\._i|^#co-bg|loading|preload|splash/i;
+    const allSelectors = [...acc.colorMap.values()].map(c => c.selector)
+      .concat(customProperties.map(p => p.selector))
+      .concat(acc.fonts.map(f => f.selector));
+    if (allSelectors.length > 0) {
+      const bootScoped = allSelectors.filter(s => BOOT_PATTERN_RE.test(s));
+      if (bootScoped.length / allSelectors.length > 0.6) {
+        insufficientReasons.push(`${Math.round(bootScoped.length / allSelectors.length * 100)}% of selectors scoped to loader/error/404 patterns`);
+      }
+    }
+
+    // A4: no selector in CSS matches any class or id present in rendered HTML body
+    const bodyClasses = new Set<string>();
+    for (const cm of htmlBody.matchAll(/class=["']([^"']+)["']/gi)) {
+      for (const cls of cm[1].trim().split(/\s+/)) { if (cls) bodyClasses.add(cls); }
+    }
+    const bodyIds = new Set<string>();
+    for (const im of htmlBody.matchAll(/id=["']([^"']+)["']/gi)) {
+      if (im[1].trim()) bodyIds.add(im[1].trim());
+    }
+    const cssSelectorText = allSelectors.join(' ');
+    const anyClassMatches = [...bodyClasses].some(c => cssSelectorText.includes(`.${c}`) || cssSelectorText.includes(c));
+    const anyIdMatches = [...bodyIds].some(i => cssSelectorText.includes(`#${i}`));
+    if (!anyClassMatches && !anyIdMatches && allSelectors.length > 0 && (bodyClasses.size > 0 || bodyIds.size > 0)) {
+      insufficientReasons.push('no CSS selector matches any class or id in the rendered HTML body');
+    }
+
+    const cssLooksInsufficient = insufficientReasons.length > 0;
+
     const diagnostics: CssDiagnostics = {
       htmlSource,
       linkedSheetsFound,
@@ -943,6 +991,8 @@ Deno.serve(async (req: Request) => {
       sheetsFailed,
       totalCssBytes,
       customPropertyCount: customProperties.length,
+      cssLooksInsufficient,
+      insufficientReasons,
     };
 
     const result: CssExtractResult = {

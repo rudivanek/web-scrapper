@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
-import { callClaude, callClaudeWithMeta, callWithContinuation } from '../lib/callClaude';
+import { callClaude, callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
@@ -29,10 +29,16 @@ interface ExtractionResult {
   blueprintJson: string;
   buildMd: string | null;
   buildMdIncomplete: boolean;
+  buildMdHighAssumption: boolean;
+  assumptionRatio: number;
+  assumptionCount: number;
+  valueCount: number;
   screenshot: string | null;
   screenshotAvailable: boolean;
   externalSheets: number;
   cssDegraded: boolean;
+  cssLooksInsufficient: boolean;
+  insufficientReasons: string[];
   platform: PlatformDetection | null;
   buildTarget: BuildTarget;
 }
@@ -284,7 +290,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         console.log('[extract-css] platform:', cssData.platform);
       }
       const externalSheets = cssData?.sheets?.length ?? 0;
-      const cssDegraded = !cssData || cssData.diagnostics.sheetsFetchedOk === 0 || cssData.diagnostics.sheetsFailed.some(f => f.reason === 'html-response (likely WAF block)');
+      const cssLooksInsufficient = cssData?.diagnostics?.cssLooksInsufficient ?? false;
+      const insufficientReasons = cssData?.diagnostics?.insufficientReasons ?? [];
+      const cssDegraded = !cssData || cssData.diagnostics.sheetsFetchedOk === 0 || cssData.diagnostics.sheetsFailed.some(f => f.reason === 'html-response (likely WAF block)') || cssLooksInsufficient;
       const platform = cssData?.platform ?? null;
       const frequency = cssData?.frequency ?? null;
       const tailwind = cssData?.tailwind ?? null;
@@ -303,14 +311,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         screenshotSegments = await prepareScreenshot(screenshot);
       }
 
-      // Phase 4: LLM Call A — design.md (with screenshot segments)
-      setPhase('llm-design', 'Generating design.md with Claude...', 45);
-      const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind);
-      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
-
-      // Phase 5: LLM Call B — blueprint JSON (with screenshot segments + design.md + asset manifest as context)
-      setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 70);
-      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, designMd, assetManifestText);
+      // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
+      // Blueprint is generated before design.md so the design call can use the blueprint's page_title and sections.
+      setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 45);
+      const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, undefined, assetManifestText);
       const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
       // Attempt to parse and re-stringify for clean JSON
@@ -323,6 +327,11 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         blueprintJson = blueprintRaw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
       }
 
+      // Phase 5: LLM Call B — design.md (with screenshot segments + blueprint.json as context)
+      setPhase('llm-design', 'Generating design.md with Claude...', 70);
+      const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, blueprintJson, cssLooksInsufficient);
+      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
+
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
       // Generated in three sequential calls to avoid truncation:
       //   Call 1: Foundation (sections 1–4), max_tokens 16000
@@ -330,13 +339,17 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       //   Call 3: Components + Assumptions (sections 6–7), max_tokens 16000
       let buildMd: string | null = null;
       let buildMdIncomplete = false;
+      let buildMdHighAssumption = false;
+      let assumptionRatio = 0;
+      let assumptionCount = 0;
+      let valueCount = 0;
       if (buildTarget === 'react-tailwind') {
         setPhase('llm-buildspec', 'Generando especificación de reconstrucción (BUILD.md)...', 90);
         try {
           const imgs = screenshotSegments.length > 0 ? screenshotSegments : undefined;
 
           // Call 1: Foundation (sections 1–4)
-          const foundationPrompt = buildFoundationUserPrompt(designMd);
+          const foundationPrompt = buildFoundationUserPrompt(designMd, blueprintJson);
           const foundationRes = await callWithContinuation(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 16000, imgs, 'Foundation');
           let foundationText = foundationRes.text.trim();
           if (foundationRes.truncated) {
@@ -417,15 +430,31 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             buildMdIncomplete = true;
           }
 
+          // Part D: Assumption ratio guard
+          const fullBuildText = `${foundationText}\n${sectionsText}\n${componentsText}`;
+          const assumedMatches = fullBuildText.match(/ASSUMED/g) ?? [];
+          assumptionCount = assumedMatches.length;
+          // Count values traced to real CSS: lines with a CSS property that do NOT contain ASSUMED
+          const valueLines = fullBuildText.split('\n').filter(l =>
+            /:\s*[^;]+;/.test(l) && !l.trim().startsWith('/*') && !l.trim().startsWith('|')
+          );
+          valueCount = valueLines.length;
+          assumptionRatio = (assumptionCount + valueCount) > 0 ? assumptionCount / (assumptionCount + valueCount) : 0;
+          buildMdHighAssumption = assumptionRatio > 0.6;
+
+          const assumptionWarning = buildMdHighAssumption
+            ? `> ⚠ ADVERTENCIA: ${assumptionCount} de ${assumptionCount + valueCount} valores en este documento son SUPUESTOS, no\n> extraídos del CSS del sitio. Esta especificación es una aproximación\n> basada mayormente en inferencia visual. Revísala completa antes de usarla.\n\n`
+            : '';
+
           // A2: Concatenate with fixed header prepended once
-          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${foundationText}\n\n${sectionsText}\n\n${componentsText}`;
+          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${assumptionWarning}${foundationText}\n\n${sectionsText}\n\n${componentsText}`;
         } catch (e) {
           console.warn('BUILD.md generation failed — delivering design.md and blueprint.json only:', e);
         }
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform, buildTarget });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -598,10 +627,33 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           )}
 
           {/* CSS extraction degraded warning */}
-          {result.cssDegraded && (
+          {result.cssDegraded && !result.cssLooksInsufficient && (
             <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>Advertencia: no se pudieron leer las hojas de estilo del sitio (posible bloqueo del servidor). El análisis de diseño está incompleto — verifica los valores manualmente.</span>
+            </div>
+          )}
+
+          {/* CSS insufficient / boot-only warning (distinct from WAF block) */}
+          {result.cssLooksInsufficient && (
+            <div className="p-3 bg-orange-50 border-2 border-orange-300 rounded-lg text-sm text-orange-800">
+              <div className="flex items-start space-x-2">
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold mb-1">Advertencia: el sitio carga sus estilos dinámicamente (JavaScript).</p>
+                  <p>Solo se capturó una parte mínima del CSS. El análisis de diseño NO es confiable — los valores deben verificarse manualmente.</p>
+                  {result.insufficientReasons.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-xs text-orange-700">
+                      {result.insufficientReasons.map((r, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="text-orange-400 mt-0.5">•</span>
+                          <span>{r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -679,6 +731,19 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron.</span>
+            </div>
+          )}
+
+          {/* BUILD.md high assumption ratio warning */}
+          {result.buildTarget === 'react-tailwind' && result.buildMd && result.buildMdHighAssumption && (
+            <div className="p-3 bg-orange-50 border-2 border-orange-300 rounded-lg text-sm text-orange-800">
+              <div className="flex items-start space-x-2">
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold mb-1">⚠ ADVERTENCIA: {result.assumptionCount} de {result.assumptionCount + result.valueCount} valores en BUILD.md son SUPUESTOS.</p>
+                  <p>Esta especificación es una aproximación basada mayormente en inferencia visual. Revísala completa antes de usarla.</p>
+                </div>
+              </div>
             </div>
           )}
 

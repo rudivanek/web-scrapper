@@ -34,15 +34,16 @@ You are responsible for sections 1 through 4 ONLY. Do NOT emit sections 5, 6, or
 
 You receive:
 1. design.md — the complete design system analysis (may contain NOT FOUND values)
-2. Screenshot segments of the rendered page
+2. blueprint.json — the page structure with page_title, section names, and section roles
+3. Screenshot segments of the rendered page
 
 ## OUTPUT FORMAT
 
 Produce these sections in order, starting immediately with "### 1. Overview" (no header, no preamble):
 
 ### 1. Overview
-- What page this is, its purpose
-- Section count
+- What page this is, its purpose — MUST be derived from blueprint.json's page_title and its section names and roles. Do NOT infer what the page is from the screenshot. A screenshot segment may show a single project thumbnail or a partial view and is not evidence of the page's purpose.
+- Section count — comes from blueprint.json's sections array, never from what is visible in a screenshot segment
 - Detected stack (CMS, builder, framework, CSS approach — from the Platform section of design.md)
 
 ### 2. Tech Notes — Fonts
@@ -79,7 +80,9 @@ A valid :root block with every token resolved to a concrete value. No NOT FOUND.
 - Do not emit the fixed header.
 - Do not emit sections 5, 6, or 7.
 - Reproduce all visible text VERBATIM from blueprint.json text_blocks where referenced. Do not summarise, translate, shorten, or improve.
-- Do not redesign or improve anything. This is a faithful reproduction spec.`;
+- Do not redesign or improve anything. This is a faithful reproduction spec.
+- Do NOT write an 'Assumptions to Verify' section. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call.
+- If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_SECTIONS_PROMPT = `${CORE_FRAMING}
 
@@ -113,7 +116,9 @@ For each section in page order, provide:
 - Use the exact image URLs from blueprint.json assets. Do not substitute placeholder images.
 - Respect every layout_contract must_preserve and do_not_do rule from blueprint.json.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
-- Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections.`;
+- Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections.
+- Do NOT write an 'Assumptions to Verify' section. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call.
+- If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_COMPONENTS_PROMPT = `${CORE_FRAMING}
 
@@ -150,14 +155,19 @@ This section is MANDATORY. If you cannot find any ASSUMED values in the provided
 - Do not emit sections 1–5.
 - Scan the provided sections 1–5 for every ASSUMED comment and include each one in the Assumptions table.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
-- If design.md contains a Contraste de color section with failures, reproduce those findings in the Component Specs so the builder is aware of accessibility issues.`;
+- If design.md contains a Contraste de color section with failures, reproduce those findings in the Component Specs so the builder is aware of accessibility issues.
+- If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
-export function buildFoundationUserPrompt(designMd: string): string {
+export function buildFoundationUserPrompt(designMd: string, blueprintJson?: string): string {
+  const blueprintBlock = blueprintJson
+    ? `\n\nHere is the blueprint.json (page structure with page_title, section names, and section roles). Use its page_title for the Overview and its sections array for the section count:\n\n\`\`\`json\n${blueprintJson}\n\`\`\`\n`
+    : '';
+
   return `Here is the design.md generated from this page:
 
 \`\`\`markdown
 ${designMd}
-\`\`\`
+\`\`\`${blueprintBlock}
 
 Generate sections 1–4 of BUILD.md. Start directly with "### 1. Overview". Do not emit the fixed header or any other sections.`;
 }

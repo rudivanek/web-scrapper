@@ -291,6 +291,8 @@ export interface CssDiagnostics {
   sheetsFailed: Array<{ url: string; reason: string }>;
   totalCssBytes: number;
   customPropertyCount: number;
+  cssLooksInsufficient: boolean;
+  insufficientReasons: string[];
 }
 
 export interface CssExtractResultWithDiagnostics extends CssExtractResult {

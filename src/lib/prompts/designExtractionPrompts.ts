@@ -1,4 +1,4 @@
-import type { PlatformDetection, FrequencyAnalysis, TailwindUtilities, FrequencyEntry } from '../lib/firecrawl';
+import type { PlatformDetection, FrequencyAnalysis, TailwindUtilities, TailwindUtilityGroup, FrequencyEntry } from '../firecrawl';
 
 export const DESIGN_SYSTEM_PROMPT = `You are a precision design system analyst. You will receive:
 1. Raw HTML including <style> tags and inline styles from the target website
@@ -129,6 +129,14 @@ Use the screenshot to VERIFY and DISAMBIGUATE, never to invent. Specifically:
 If the screenshot contradicts the CSS, report BOTH and say which you believe renders, with your reason. Do not read hex values off the screenshot — colors must still come from CSS.
 
 ## CRITICAL RULES
+
+### Blueprint Context
+You are given the blueprint for this page. Use its page_title for the document title and its sections to understand what the page actually is. Never write '[Brand Name — NOT FOUND]' when the blueprint supplies a title.
+
+### Boot-Only CSS Warning
+If the supplied CSS is dominated by loader, 404, or error-state selectors, say so explicitly at the top of the Platform section:
+  'ADVERTENCIA: el CSS capturado corresponde principalmente a estados de carga y error, no al diseño real de la página. Los tokens a continuación NO representan el sistema de diseño del sitio.'
+Do not present 404-page tokens as the site's design system.
 
 ### Colors — Real Computed Styles Only
 
@@ -676,6 +684,8 @@ export function buildDesignUserPrompt(
   platform?: PlatformDetection | null,
   frequency?: FrequencyAnalysis | null,
   tailwind?: TailwindUtilities | null,
+  blueprintJson?: string,
+  cssLooksInsufficient?: boolean,
 ): string {
   const hasCss = combinedCss.trim().length > 0;
 
@@ -705,18 +715,26 @@ export function buildDesignUserPrompt(
 
   let tailwindBlock = '';
   if (tailwind && tailwind.groups.length > 0) {
-    const groupText = tailwind.groups.map(g => {
-      const classes = g.classes.map(c => `  ${c.className} (${c.count}×)`).join('\n');
+    const groupText = tailwind.groups.map((g: TailwindUtilityGroup) => {
+      const classes = g.classes.map((c: { className: string; count: number }) => `  ${c.className} (${c.count}×)`).join('\n');
       return `  ${g.category}:\n${classes}`;
     }).join('\n');
     tailwindBlock = `\n\n/* ─── Tailwind utility classes in use (with counts) ─── */\n${groupText}`;
   }
 
+  const blueprintBlock = blueprintJson
+    ? `\n\n/* ─── Blueprint context ─── */\nHere is the blueprint for this page. Use its page_title for the document title and its sections to understand what the page actually is. Never write '[Brand Name — NOT FOUND]' when the blueprint supplies a title.\n\n\`\`\`json\n${blueprintJson}\n\`\`\``
+    : '';
+
+  const insufficientNote = cssLooksInsufficient
+    ? `\n\n/* ─── CSS INSUFFICIENCY WARNING ─── */\nThe CSS captured from this site is dominated by loader, 404, or error-state selectors and does not represent the real design system. State this explicitly at the top of the Platform section. Do not present these tokens as the site's design system.`
+    : '';
+
   return `Here is the CSS extracted from the page (external stylesheets, inline <style> blocks, and style= attributes)${hasCss ? '' : ' (NONE FOUND — no CSS was retrieved from any source)'}:
 
 \`\`\`css
 ${hasCss ? combinedCss : '/* No CSS returned from any source */'}
-\`\`\`${platformBlock}${freqBlock}${tailwindBlock}
+\`\`\`${platformBlock}${freqBlock}${tailwindBlock}${blueprintBlock}${insufficientNote}
 
 Generate the complete design.md file. Start with the Platform section using the detected values above. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }
