@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.17 | Last Updated: 2026-07-24T00:00:00Z -->
+<!-- Version: 1.18 | Last Updated: 2026-07-24T00:30:00Z -->
 
 ---
 
@@ -1254,6 +1254,16 @@ The following rules were added to the `DESIGN_SYSTEM_PROMPT` in `src/lib/prompts
 5. **CONFIRMED ABSENT vs NOT FOUND.** NOT FOUND means the value could not be determined. CONFIRMED ABSENT means the full CSS was searched and the property is never declared — in which case report the CSS initial value and mark it, e.g. `--radius-md: 0; /* CONFIRMED ABSENT — no border-radius declared anywhere */`. Use CONFIRMED ABSENT only when the complete stylesheet set is available and the property genuinely never appears. The token table and component specs must agree — never report NOT FOUND in one and a concrete value in the other. Previously, the token table would say NOT FOUND while component specs reported the CSS default (e.g. `border-radius: 0`).
 
 6. **One token, one value (no parenthetical scopes).** Never emit a token holding several values with parenthetical scopes (e.g. `--container-max: 960px (hero), 740px (method-tiers), 760px (philosophy p)`). When a property varies by context, emit separate scoped tokens (`--container-max-hero`, `--container-max-method`, `--container-max-prose`). If a dominant value exists, also emit the generic token set to it and note which sections deviate. Multi-value shorthand (e.g. `padding: 70px 60px 34px`) is acceptable as a token value only when declared that way in the CSS — keep the shorthand and note it is a shorthand rather than a single scalar.
+
+7. **Type Scale is a scale, not a class inventory.** On class-based sites (Webflow, Wix, Squarespace, plain CSS) dozens of classes set font-sizes independently. The Type Scale table must consolidate them: group by rendered role (display, h1, h2, h3, body, small, label, button, nav) inferred from tag, class name, and screenshot; one row per role using the most frequent value; cap at 12 rows; list notable one-off variants beneath the table as prose. Previously, the table would list every class that set a font-size, producing an unmanageable inventory.
+
+8. **Resolve inherited properties.** `font-family`, `color`, and `line-height` cascade. If body or a root wrapper sets `font-family` and a heading does not override it, the heading inherits that family — report it with an `(inherited from ...)` note, do not write NOT FOUND. Only write NOT FOUND when no ancestor in the CSS sets the property. Previously, headings would report NOT FOUND for font-family even though they inherited it from body.
+
+9. **Preserve responsive and fluid values.** Viewport units and multi-breakpoint values are the real design intent. Write `9vw` or `7vw → 8vw (≥1440px)` as declared, never a single flattened px value. Previously, the prompt would collapse responsive values to a single px approximation.
+
+10. **Report whether a coherent type scale exists.** If sizes are arbitrary per-class values with no consistent ratio, state so explicitly: "No systematic type scale — sizes are set per-class with no consistent ratio. This is typical of visual page builders and makes the site harder to maintain." This is a real audit finding, not an extraction failure. Previously, the prompt would either fabricate a scale or report NOT FOUND, neither of which communicated the actual situation.
+
+11. **Spacing table consolidation.** The same consolidation rule applies to the Spacing table: group the most-used values into a scale, cap at 10 rows, and note when no consistent scale exists. Previously, the spacing table would list every distinct padding/margin value found, producing an inventory rather than a scale.
 
 ---
 

@@ -50,6 +50,23 @@ If a dominant value exists, also emit the generic token set to it and note which
 
 Multi-value shorthand is acceptable as a token value only when it is declared that way in the CSS (e.g. padding: 70px 60px 34px). Keep the shorthand, and note it is a shorthand rather than a single scalar.
 
+The Type Scale table must be a SCALE, not an inventory of every class that sets a font-size. On class-based sites (Webflow, Wix, Squarespace, plain CSS) dozens of classes set sizes independently. Consolidate them:
+  - Group by rendered role (display, h1, h2, h3, body, small, label, button, nav), inferred from the tag, the class name, and the screenshot
+  - One row per role, using the value that appears most often for that role
+  - Cap the table at 12 rows
+  - List notable one-off variants beneath the table as prose, not as rows
+
+RESOLVE INHERITED PROPERTIES. font-family, color, and line-height cascade. If body or a root wrapper class sets font-family and a heading class does not override it, that heading INHERITS that family — report it, do not write NOT FOUND. Only write NOT FOUND when no ancestor in the CSS sets the property. State when a value is inherited rather than declared, e.g.
+  Stelvio (inherited from .body)
+
+Preserve responsive and fluid values as declared. Viewport units and multi-breakpoint values are the real design intent — write '9vw' or '7vw → 8vw (≥1440px)', never a single flattened px value.
+
+Report whether the site HAS a coherent type scale. If sizes are arbitrary per-class values with no consistent ratio, say so explicitly:
+  'No systematic type scale — sizes are set per-class with no consistent ratio. This is typical of visual page builders and makes the site harder to maintain.'
+This is a real finding for the audit report, not a failure of extraction.
+
+Apply the same consolidation rule to the Spacing table: group the most-used values into a scale, cap at 10 rows, and note when no consistent scale exists.
+
 ## SCREENSHOT USAGE
 
 You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
@@ -132,6 +149,8 @@ FONT FALLBACK — JAVASCRIPT-LOADED FONTS: If after all 6 steps you found NO cus
 ### Type Scale — Real Computed Sizes
 For headline sizes, extract the ACTUAL computed font-size from H1, H2, H3. Look in inline styles, class-based CSS, and theme CSS. NEVER write "default size" or "None". If a size cannot be traced to CSS or confirmed visually, write NOT FOUND — verify manually.
 
+Consolidate class-based sizes into a scale (see the Type Scale consolidation rule above). One row per rendered role, not one row per class. Cap at 12 rows. List notable one-off variants beneath the table as prose. Resolve inherited font-family and line-height — report the inherited value with an '(inherited from ...)' note rather than NOT FOUND. Preserve responsive/fluid values (vw units, multi-breakpoint values) as declared.
+
 ### NEVER INVENT DATA
 CRITICAL: If a color, font, or design token cannot be evidenced from the provided CSS, HTML, or screenshot, write "NOT FOUND — verify manually" for that field. DO NOT infer, guess, or derive values from the brand name, industry conventions, or aesthetic judgment. A hallucinated color is infinitely worse than a missing one. If no success/warning/error/info colors exist in the CSS, they are NOT FOUND — do not use defaults.
 
@@ -189,18 +208,25 @@ font-family: '[Font Name]', [fallbacks];
 \`\`\`
 
 ### Type Scale
+Consolidate into a scale — one row per rendered role, not one per class. Cap at 12 rows. List notable one-off variants beneath the table as prose.
 | Style | Font | Size | Weight | Line-Height | Letter-Spacing |
 |-------|------|------|--------|-------------|----------------|
-| H1 | [font] | [px] | [weight] | [ratio] | [em/px] |
-| H2 | [font] | [px] | [weight] | [ratio] | [em/px] |
-| H3 | [font] | [px] | [weight] | [ratio] | [em/px] |
-| Body Large | [font] | [px] | [weight] | [ratio] | [em/px] |
-| Body | [font] | [px] | [weight] | [ratio] | [em/px] |
-| Caption | [font] | [px] | [weight] | [ratio] | [em/px] |
+| Display | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| H1 | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| H2 | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| H3 | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| Body Large | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| Body | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| Small / Caption | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| Button | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+| Nav | [font] | [px or vw] | [weight] | [ratio] | [em/px] |
+
+**Type scale assessment:** [State whether a coherent scale exists, or note that sizes are arbitrary per-class with no consistent ratio.]
 
 ---
 
 ## Spacing System
+Consolidate the most-used values into a scale — cap at 10 rows. Note when no consistent scale exists.
 | Token | Value | Usage |
 |-------|-------|-------|
 | --space-xs | [px] | |
@@ -211,6 +237,8 @@ font-family: '[Font Name]', [fallbacks];
 | --container-max | [px] | Max container width |
 | --container-padding | [px] | Horizontal container padding |
 | --section-padding | [px] | Vertical section padding |
+
+**Spacing scale assessment:** [State whether a coherent spacing scale exists, or note that values are arbitrary with no consistent ratio.]
 
 ---
 
