@@ -137,7 +137,7 @@ function AppContent() {
                 <Shell className="w-8 h-8 text-orange-500 mr-3" />
                 Web-Scraper
               </h1>
-              <span className="ml-3 text-sm text-gray-500 translate-y-[-3px]">V7.0</span>
+              <span className="ml-3 text-sm text-gray-500 translate-y-[-3px]">V8</span>
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-neutral-600">{user.email}</span>
