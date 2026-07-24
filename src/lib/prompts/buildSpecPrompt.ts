@@ -16,6 +16,8 @@ Derive assumptions in this order:
   3. Common conventions for the detected platform
 Never derive from brand name, industry, or aesthetic taste.
 
+Selectors scoped to a page or template other than the one being analysed must not be applied to this page's sections. Watch for template prefixes such as .p.sei, .p.in, #_404, #lo, ._i-w — these belong to other views. If a section's colour or size is unknown, mark it ASSUMED — never borrow a value from a different template scope and present it as confirmed. Only compute contrast pairings for colours that ACTUALLY OCCUR TOGETHER on this page; if two colours come from selectors in different template scopes, omit the pairing entirely rather than reporting a false accessibility failure.
+
 Values already marked CONFIRMED ABSENT in design.md are NOT assumptions — carry them through as real values with no ASSUMED marker.
 
 The string 'NOT FOUND' must never appear in BUILD.md, including inside comments. If a token has no value, either omit it entirely or supply an ASSUMED value. Write 'no declarado en el CSS de marca' if you need to explain an omission.
@@ -81,7 +83,7 @@ A valid :root block with every token resolved to a concrete value. No NOT FOUND.
 - Do not emit sections 5, 6, or 7.
 - Reproduce all visible text VERBATIM from blueprint.json text_blocks where referenced. Do not summarise, translate, shorten, or improve.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
-- Do NOT write an 'Assumptions to Verify' section. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call.
+- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
 - If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_SECTIONS_PROMPT = `${CORE_FRAMING}
@@ -117,7 +119,7 @@ For each section in page order, provide:
 - Respect every layout_contract must_preserve and do_not_do rule from blueprint.json.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
 - Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections.
-- Do NOT write an 'Assumptions to Verify' section. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call.
+- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
 - If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_COMPONENTS_PROMPT = `${CORE_FRAMING}

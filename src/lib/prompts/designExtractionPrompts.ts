@@ -130,6 +130,10 @@ If the screenshot contradicts the CSS, report BOTH and say which you believe ren
 
 ## CRITICAL RULES
 
+### Off-Page Selectors — Never Apply to This Page
+
+Selectors scoped to a page or template that is NOT the page being analysed must not be applied to this page's sections. Watch for template prefixes such as .p.sei, .p.in, #_404, #lo, ._i-w — these belong to other views. You may document such values in the token tables, clearly labelled with their scope, but you must NOT assign them to sections of this page. If a section's colour or size is unknown, mark it NOT FOUND or ASSUMED — never borrow a value from a different template and present it as confirmed.
+
 ### Blueprint Context
 You are given the blueprint for this page. Use its page_title for the document title and its sections to understand what the page actually is. Never write '[Brand Name — NOT FOUND]' when the blueprint supplies a title.
 
@@ -538,6 +542,8 @@ Para cada combinación de color de texto y color de fondo ya identificada en est
 | [hex] | [hex] | [X.X:1] | [Pasa / Falla] | [Pasa / Falla] |
 
 Reglas:
+- Calcula solo para combinaciones que OCURRAN JUNTAS en esta página. No emparejes un color de texto de un alcance de plantilla con un fondo de otro. Si no puedes establecer que una combinación se renderiza junta, omítela completamente en lugar de reportar un fallo. Un hallazgo de accesibilidad falso es peor que ninguno — daña la confianza del cliente.
+- Caso específico a evitar: no emparrajes un color de una plantilla (e.g. `.p.sei`, `.p.in`) con un fondo de otra. Si los dos colores provienen de reglas con prefijos de plantilla distintos, son de vistas diferentes y no coexisten en la misma página.
 - Calcula solo para combinaciones ya documentadas arriba. No inventes combinaciones.
 - Omite cualquier combinación donde algún color sea NOT FOUND.
 - Para colores semi-transparentes, compón sobre el fondo indicado primero y nota que el resultado es compuesto.

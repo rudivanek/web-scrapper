@@ -430,24 +430,43 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             buildMdIncomplete = true;
           }
 
-          // Part D: Assumption ratio guard
+          // Part C: Assumption ratio guard
           const fullBuildText = `${foundationText}\n${sectionsText}\n${componentsText}`;
-          const assumedMatches = fullBuildText.match(/ASSUMED/g) ?? [];
-          assumptionCount = assumedMatches.length;
-          // Count values traced to real CSS: lines with a CSS property that do NOT contain ASSUMED
+          // Count ASSUMED occurrences in the body text
+          const assumedInText = (fullBuildText.match(/ASSUMED/g) ?? []).length;
+          // Count rows in the Assumptions table (lines that look like | section | property | value | reason |)
+          const assumedTableRows = (fullBuildText.match(/^\|\s*[^-|][^|]*\|[^|]+\|[^|]+\|[^|]+\|\s*$/gm) ?? []).length;
+          assumptionCount = Math.max(assumedInText, assumedTableRows);
+          // Count confirmed values: CSS property declarations not carrying ASSUMED
           const valueLines = fullBuildText.split('\n').filter(l =>
-            /:\s*[^;]+;/.test(l) && !l.trim().startsWith('/*') && !l.trim().startsWith('|')
+            /:\s*[^;]+;/.test(l) && !l.trim().startsWith('/*') && !l.trim().startsWith('|') && !l.includes('ASSUMED')
           );
           valueCount = valueLines.length;
-          assumptionRatio = (assumptionCount + valueCount) > 0 ? assumptionCount / (assumptionCount + valueCount) : 0;
-          buildMdHighAssumption = assumptionRatio > 0.6;
+          const total = assumptionCount + valueCount;
+          assumptionRatio = total > 0 ? assumptionCount / total : 0;
+          // Threshold: >= 40 absolute OR > 50%
+          buildMdHighAssumption = assumptionCount >= 40 || assumptionRatio > 0.5;
+          console.log(`[BUILD.md] assumptions: ${assumptionCount}, confirmed: ${valueCount}, ratio: ${Math.round(assumptionRatio * 100)}%`);
+
+          // Part B2: Strip duplicate "Assumptions to Verify" headings — keep only the LAST one
+          const assumptionHeadingRe = /^#{1,4}\s+Assumptions to Verify[^\n]*/gim;
+          const headingMatches = [...fullBuildText.matchAll(assumptionHeadingRe)];
+          if (headingMatches.length > 1) {
+            console.warn(`[BUILD.md] ${headingMatches.length} "Assumptions to Verify" headings found — stripping all but the last`);
+          }
+
+          // Reassemble in order and strip duplicate assumption headings from foundation + sections blocks
+          const stripAssumptionHeadings = (text: string) =>
+            text.replace(/^#{1,4}\s+Assumptions to Verify[^\n]*\n([\s\S]*?)(?=^#|$(?!\n))/gim, '').trimEnd();
+          const cleanFoundation = headingMatches.length > 1 ? stripAssumptionHeadings(foundationText) : foundationText;
+          const cleanSections = headingMatches.length > 1 ? stripAssumptionHeadings(sectionsText) : sectionsText;
 
           const assumptionWarning = buildMdHighAssumption
-            ? `> ⚠ ADVERTENCIA: ${assumptionCount} de ${assumptionCount + valueCount} valores en este documento son SUPUESTOS, no\n> extraídos del CSS del sitio. Esta especificación es una aproximación\n> basada mayormente en inferencia visual. Revísala completa antes de usarla.\n\n`
+            ? `> \u26a0 ADVERTENCIA: ${assumptionCount} valores en este documento son SUPUESTOS, no extraídos del CSS del sitio.\n> Esta especificación es en gran parte una aproximación visual. Revisa la sección "Assumptions to Verify" antes de usarla.\n\n`
             : '';
 
-          // A2: Concatenate with fixed header prepended once
-          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${assumptionWarning}${foundationText}\n\n${sectionsText}\n\n${componentsText}`;
+          // A2: Concatenate with fixed header prepended once (using cleaned foundation/sections if duplicates were stripped)
+          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${assumptionWarning}${cleanFoundation}\n\n${cleanSections}\n\n${componentsText}`;
         } catch (e) {
           console.warn('BUILD.md generation failed — delivering design.md and blueprint.json only:', e);
         }

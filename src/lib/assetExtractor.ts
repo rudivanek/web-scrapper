@@ -8,6 +8,11 @@ export interface ExtractedAsset {
   height: number | null;
 }
 
+export interface ExtractedVideo {
+  url: string;
+  poster: string | null;
+}
+
 export interface AssetManifest {
   global_assets: {
     logo: string | null;
@@ -15,6 +20,7 @@ export interface AssetManifest {
     og_image: string | null;
   };
   images: ExtractedAsset[];
+  videos: ExtractedVideo[];
   background_images: string[];
   inline_svg_count: number;
   svg_fill_colors: string[];
@@ -143,6 +149,26 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
     }
   }
 
+  // ── <video> elements ──
+  const videos: ExtractedVideo[] = [];
+  const allVideos = doc.querySelectorAll('video');
+  for (const vid of allVideos) {
+    const src = vid.getAttribute('src');
+    const poster = vid.getAttribute('poster');
+    const absPoster = poster ? toAbsolute(poster, origin, base) : null;
+    if (src) {
+      videos.push({ url: toAbsolute(src, origin, base), poster: absPoster });
+    }
+    // <source> children
+    const sources = vid.querySelectorAll('source');
+    for (const s of sources) {
+      const ssrc = s.getAttribute('src');
+      if (ssrc) {
+        videos.push({ url: toAbsolute(ssrc, origin, base), poster: absPoster });
+      }
+    }
+  }
+
   // ── Inline SVG icons ──
   const inlineSvgs = doc.querySelectorAll('svg');
   const svgFillColors = new Set<string>();
@@ -160,6 +186,14 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
     }
   }
 
+  const videoCount = videos.length;
+  const imgCount = images.length;
+  const totalAssets = imgCount + videoCount;
+  console.log(`[assets] extracted ${totalAssets} assets (${imgCount} images, ${videoCount} videos)`);
+  if (totalAssets === 0 && (rawHtml.includes('<img') || rawHtml.includes('<video'))) {
+    console.warn('[assets] WARNING: 0 assets extracted but rawHtml contains <img> or <video> tags — possible extraction bug');
+  }
+
   return {
     global_assets: {
       logo,
@@ -167,6 +201,7 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
       og_image: ogImage,
     },
     images,
+    videos,
     background_images: [...new Set(backgroundImages)],
     inline_svg_count: inlineSvgs.length,
     svg_fill_colors: [...svgFillColors],
@@ -230,6 +265,14 @@ export function formatAssetManifestForPrompt(manifest: AssetManifest): string {
     lines.push('\nBackground images (CSS url()):');
     for (const url of manifest.background_images) {
       lines.push(`  ${url}`);
+    }
+  }
+
+  if (manifest.videos.length > 0) {
+    lines.push('\nVideos found on the page:');
+    for (const vid of manifest.videos) {
+      const posterNote = vid.poster ? ` poster="${vid.poster}"` : '';
+      lines.push(`  ${vid.url}${posterNote} role="video"`);
     }
   }
 

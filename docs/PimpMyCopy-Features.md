@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.1 | Last Updated: 2026-07-24T22:00:00Z -->
+<!-- Version: 8.2 | Last Updated: 2026-07-24T22:30:00Z -->
 
 ---
 
@@ -1135,7 +1135,7 @@ A new "Design Extract" tab in the main Scrape panel runs a production-grade two-
 
 ### Pipeline Overview
 
-**Updated:** 2026-07-24 — Reordered pipeline: blueprint now generates FIRST, then design.md receives blueprint.json as context. Added boot-only CSS detection (`cssLooksInsufficient`) to the `extract-css` edge function. Added assumption ratio guard to BUILD.md. Fixed duplicate Assumptions section. Pinned section numbering in all prompts.
+**Updated:** 2026-07-24 (v8.2) — Reordered pipeline: blueprint now generates FIRST, then design.md receives blueprint.json as context. Added boot-only CSS detection (cssLooksInsufficient) to extract-css edge function. Added assumption ratio guard to BUILD.md (threshold: >=40 absolute OR >50%). Fixed duplicate Assumptions section (programmatic stripping + stronger B1 prompt rule). Added off-page selector guard to all prompts (D1) and cross-template contrast prohibition (D2/D3). Added video extraction to asset manifest (<video> src, <source> children, poster attribute). Assumption ratio logging added.
 
 The pipeline is now split into four sequential phases:
 
