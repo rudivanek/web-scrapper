@@ -96,6 +96,24 @@ A CSS custom property that is declared but never referenced by any rule is NOT e
 
 If the site uses Tailwind, the utility classes ARE the design system. Reconstruct tokens from them: bg-slate-900 means the Tailwind slate-900 value, text-lg means the Tailwind lg font-size. Resolving default Tailwind scale names to their standard values is resolution, not fabrication, because the scale is fixed and public. Arbitrary bracket values are literal and take priority over scale names. If a custom theme extension is evident from non-standard class names, report the class name and mark the value NOT FOUND — verify manually.
 
+## FORMS & INPUTS
+Extract form element styles from the CSS — text inputs, textareas, selects, checkboxes, radios, labels, placeholders, error/success states, and submit buttons. For each, report background, border, border-radius, padding, font-size, color, and focus appearance. On Webflow, .w-input / .w-select / .w-form-fail / .w-form-done are the PLATFORM DEFAULTS — report them as such and note when the site has not restyled them. If the page has no form, write "No form elements present on this page."
+
+## INTERACTIVE STATES
+For every interactive component, report :hover, :focus, :focus-visible, :active, and :disabled separately. If no focus styles exist anywhere in the CSS, state it explicitly: "CONFIRMED ABSENT — no :focus or :focus-visible styles declared. Keyboard users cannot see which element is selected. Accessibility finding."
+
+## LINKS
+Extract the default link color, text-decoration, hover state, and visited state from the CSS. State whether links inside body copy are visually distinguishable from surrounding text. If link styles are not declared, write NOT FOUND.
+
+## LAYOUT SYSTEM
+Extract container widths and their breakpoints, grid patterns actually used (column counts and gaps, from the frequency analysis), flex patterns, and a z-index scale listing every declared z-index value with the element it applies to, sorted ascending. If no z-index values are declared, write NOT FOUND.
+
+## MEDIA TREATMENT
+Extract CSS filters applied to images (grayscale, brightness, contrast), object-fit, aspect-ratio, hover transforms, and border-radius on images. Where the screenshot shows a consistent photographic treatment, state whether it comes from CSS or is baked into the source files — and if it cannot be determined, say so rather than guessing.
+
+## CONTRAST CHECK
+For every text-color / background-color pairing already identified in this document, compute the WCAG contrast ratio and report pass/fail against 4.5:1 for normal text and 3:1 for large text. Compute only for pairings actually documented above — do not invent pairings. Skip any pairing where either colour is NOT FOUND. For semi-transparent colours, composite over the stated background first and note that the result is composited. Below the table, list failures in plain Spanish a non-technical client can act on. This is arithmetic on values already extracted — not inference. Rule 0 still applies to the colours themselves.
+
 ## SCREENSHOT USAGE
 
 You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
@@ -282,6 +300,30 @@ Consolidate the most-used values into a scale — cap at 10 rows. Note when no c
 
 ---
 
+## Layout System
+
+### Containers
+| Name | Max width | Horizontal padding | Breakpoint |
+|------|-----------|-------------------|-----------|
+| [container name or selector] | [px] | [px] | [where it applies] |
+
+### Grid Patterns
+List every grid pattern actually used, derived from the frequency analysis and CSS. Do not list patterns that are not present.
+| Selector / context | Columns | Gap | |
+|---------------------|---------|-----|-|
+| [selector or section] | [count] | [px] | |
+
+### Flex Patterns
+[Describe the flex layouts actually in use — e.g. 'header: flex row, align-center, justify-between; card body: flex column, gap-16px'. List only patterns found in the CSS.]
+
+### Z-Index Scale
+List every declared z-index value found in the CSS, sorted ascending. If none are declared, write NOT FOUND.
+| z-index | Element / selector |
+|---------|-------------------|
+| [value] | [selector] |
+
+---
+
 ## Borders & Radius
 | Token | Value |
 |-------|-------|
@@ -372,6 +414,131 @@ background: [hex];
 color: [hex];
 padding: [value];
 \`\`\`
+
+### Form Elements
+For each element below, report: background, border, border-radius, padding, font-size, color, and focus appearance. If the page has no form, write: "No form elements present on this page."
+
+On Webflow, .w-input / .w-select / .w-form-fail / .w-form-done are the PLATFORM DEFAULTS — report them as such and note when the site has not restyled them, since unstyled default forms are a real finding.
+
+#### Text Input
+\`\`\`css
+background: [hex];
+border: [width] solid [hex];
+border-radius: [value];
+padding: [value];
+font-size: [px];
+color: [hex];
+/* Focus: [describe — border color, outline, box-shadow, or NOT FOUND] */
+/* Placeholder color: [hex or NOT FOUND] */
+/* Error state: [describe or NOT FOUND] */
+/* Success state: [describe or NOT FOUND] */
+\`\`\`
+
+#### Textarea
+\`\`\`css
+[same properties as text input]
+\`\`\`
+
+#### Select
+\`\`\`css
+[same properties as text input]
+\`\`\`
+
+#### Checkbox
+\`\`\`css
+[width, height, border, border-radius, background, checked state, or NOT FOUND]
+\`\`\`
+
+#### Radio
+\`\`\`css
+[width, height, border, border-radius, background, checked state, or NOT FOUND]
+\`\`\`
+
+#### Label
+\`\`\`css
+font-size: [px];
+font-weight: [weight];
+color: [hex];
+margin-bottom: [value];
+\`\`\`
+
+#### Submit Button
+\`\`\`css
+[same format as Button — Primary, or note if it reuses the same styles]
+\`\`\`
+
+### Links (body text)
+\`\`\`css
+color: [hex];
+text-decoration: [value];
+/* Hover: color [hex], text-decoration [value] */
+/* Visited: color [hex or NOT FOUND] */
+\`\`\`
+**Distinguishability:** [State whether links inside body copy are visually distinguishable from surrounding text. If not, say so explicitly.]
+
+---
+
+## Interactive States
+For every interactive component identified above (buttons, links, inputs, cards, nav items), report each state separately. If a state is not declared in the CSS, write NOT FOUND for that state.
+
+| Component | :hover | :focus | :focus-visible | :active | :disabled |
+|-----------|--------|--------|---------------|---------|-----------|
+| Button — Primary | [describe or NOT FOUND] | [describe or NOT FOUND] | [describe or NOT FOUND] | [describe or NOT FOUND] | [describe or NOT FOUND] |
+| Button — Secondary | [...] | [...] | [...] | [...] | [...] |
+| Links | [...] | [...] | [...] | [...] | [...] |
+| Text Input | [...] | [...] | [...] | [...] | [...] |
+| Card | [...] | [...] | [...] | [...] | [...] |
+| Nav items | [...] | [...] | [...] | [...] | [...] |
+
+If no focus styles exist anywhere in the CSS, state it explicitly:
+"CONFIRMED ABSENT — no :focus or :focus-visible styles declared. Keyboard users cannot see which element is selected. Accessibility finding."
+
+---
+
+## Media Treatment
+
+### Image Filters
+List every CSS filter applied to images. If none, write NOT FOUND.
+| Filter | Value | Selector / context |
+|--------|-------|-------------------|
+| [grayscale / brightness / contrast / etc.] | [value] | [where it applies] |
+
+### Object-Fit
+| Selector / context | object-fit | aspect-ratio |
+|---------------------|------------|--------------|
+| [selector] | [contain / cover / fill / none / NOT FOUND] | [ratio or NOT FOUND] |
+
+### Image Hover Transforms
+[Describe any transform applied to images on hover — scale, rotate, translate. If none, write NOT FOUND.]
+
+### Image Border-Radius
+| Selector / context | border-radius |
+|---------------------|-------------|
+| [selector] | [value or NOT FOUND] |
+
+### Photographic Treatment
+Where the screenshot shows a consistent photographic treatment (e.g. all images are desaturated, or all have a warm tint), state whether it comes from CSS (filters found above) or is baked into the source image files. If it cannot be determined from the CSS and screenshot alone, say so explicitly rather than guessing.
+
+---
+
+## Contraste de color
+
+Para cada combinación de color de texto y color de fondo ya identificada en este documento, calcula la relación de contraste WCAG y reporta:
+
+| Texto | Fondo | Ratio | AA normal | AA grande |
+|-------|------|-------|-----------|-----------|
+| [hex] | [hex] | [X.X:1] | [Pasa / Falla] | [Pasa / Falla] |
+
+Reglas:
+- Calcula solo para combinaciones ya documentadas arriba. No inventes combinaciones.
+- Omite cualquier combinación donde algún color sea NOT FOUND.
+- Para colores semi-transparentes, compón sobre el fondo indicado primero y nota que el resultado es compuesto.
+- AA normal requiere 4.5:1. AA grande (texto ≥ 18px o ≥ 14px en negrita) requiere 3:1.
+
+Debajo de la tabla, lista las fallas en español sencillo que un cliente no técnico pueda entender, por ejemplo:
+"El texto gris claro sobre el fondo oscuro del pie de página es difícil de leer para muchas personas."
+
+Esto es aritmética sobre valores ya extraídos — no inferencia. Rule 0 sigue aplicando a los colores mismos.
 
 ---
 

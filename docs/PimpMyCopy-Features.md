@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.21 | Last Updated: 2026-07-24T03:00:00Z -->
+<!-- Version: 1.22 | Last Updated: 2026-07-24T04:00:00Z -->
 
 ---
 
@@ -1436,6 +1436,24 @@ export function buildDesignUserPrompt(
 ```
 
 The platform detection, frequency analysis, and Tailwind utility data are injected into the user prompt as structured comment blocks so the LLM has the detected stack and derived data as context.
+
+#### Six New design.md Sections (2026-07-24)
+
+**Added:** 2026-07-24 — Six new sections added to the design.md output format and the analysis rules in `DESIGN_SYSTEM_PROMPT`. All follow existing conventions (Rule 0, NOT FOUND, CONFIRMED ABSENT, derived-with-count).
+
+**A. Form Elements** (under Component Specs) — Extracts styles for text input, textarea, select, checkbox, radio, label, placeholder, error state, success state, and submit button. For each: background, border, border-radius, padding, font-size, color, and focus appearance. On Webflow, `.w-input` / `.w-select` / `.w-form-fail` / `.w-form-done` are reported as PLATFORM DEFAULTS and the prompt notes when the site has not restyled them. If the page has no form, the output reads "No form elements present on this page."
+
+**B. Interactive States** (new top-level section) — For every interactive component (buttons, links, inputs, cards, nav items), reports `:hover`, `:focus`, `:focus-visible`, `:active`, and `:disabled` separately in a table. If no focus styles exist anywhere in the CSS, the output states explicitly: "CONFIRMED ABSENT — no :focus or :focus-visible styles declared. Keyboard users cannot see which element is selected. Accessibility finding."
+
+**C. Links (body text)** (under Component Specs) — Reports default color, text-decoration, hover state, visited state, and whether links inside body copy are visually distinguishable from surrounding text.
+
+**D. Layout System** (new top-level section after Spacing) — Reports container widths and their breakpoints, grid patterns actually used (column counts and gaps, from the frequency analysis), flex patterns, and a z-index scale listing every declared z-index value with the element it applies to, sorted ascending.
+
+**E. Media Treatment** (new top-level section) — Reports CSS filters applied to images (grayscale, brightness, contrast), object-fit, aspect-ratio, hover transforms, and border-radius on images. Where the screenshot shows a consistent photographic treatment, states whether it comes from CSS or is baked into the source files — and if it cannot be determined, says so rather than guessing.
+
+**F. Contraste de color** (new top-level section, written in Spanish) — For every text-color / background-color pairing already identified in the document, computes the WCAG contrast ratio and reports pass/fail against 4.5:1 for normal text and 3:1 for large text. Rules: compute only for pairings actually documented above (no inventing pairings), skip any pairing where either colour is NOT FOUND, composite semi-transparent colours over the stated background first. Below the table, lists failures in plain Spanish a non-technical client can act on. This is arithmetic on values already extracted — not inference. Rule 0 still applies to the colours themselves.
+
+**What did NOT change:** Rule 0, NOT FOUND / CONFIRMED ABSENT conventions, type-scale consolidation, frequency-derived tokens with counts, the Platform section, or the `:root` block rules.
 
 ---
 
