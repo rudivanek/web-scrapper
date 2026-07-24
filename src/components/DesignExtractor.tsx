@@ -314,6 +314,11 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
       // Blueprint is generated before design.md so the design call can use the blueprint's page_title and sections.
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 45);
+      // FIX 2: trace — confirm the full design.md reaches the blueprint call (design.md is generated later,
+      // but the blueprint call itself does NOT consume design.md; it consumes cleanedHtml + assetManifestText.
+      // We trace the inputs that actually reach this call so we can verify nothing is a stub/placeholder.
+      console.log(`[pipeline] design.md -> blueprint: design.md not yet generated at this stage (blueprint runs first)`);
+      console.log(`[pipeline] blueprint inputs: cleanedHtml=${cleanedHtml.length} chars, assetManifest=${assetManifestText.length} chars, screenshots=${screenshotSegments.length}`);
       const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, undefined, assetManifestText);
       const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
@@ -331,6 +336,8 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       setPhase('llm-design', 'Generating design.md with Claude...', 70);
       const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, blueprintJson, cssLooksInsufficient);
       const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
+      // FIX 2: trace — log the FULL generated design.md string so we can confirm it is real content, not a stub.
+      console.log(`[pipeline] design.md generated: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
       // Generated in three sequential calls to avoid truncation:
@@ -349,6 +356,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           const imgs = screenshotSegments.length > 0 ? screenshotSegments : undefined;
 
           // Call 1: Foundation (sections 1–4)
+          console.log(`[pipeline] design.md -> foundation: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
           const foundationPrompt = buildFoundationUserPrompt(designMd, blueprintJson);
           const foundationRes = await callWithContinuation(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 16000, imgs, 'Foundation');
           let foundationText = foundationRes.text.trim();
@@ -381,6 +389,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               sectionBatchRanges.push({ start: startIdx, end: endIdx, total: totalSections });
             }
             for (const range of sectionBatchRanges) {
+              console.log(`[pipeline] design.md -> sections batch ${range.start}–${range.end}: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
               const batchPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText, range);
               const batchRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs, `Sections batch ${range.start}–${range.end}`);
               sectionsText += (sectionsText ? '\n\n' : '') + batchRes.text.trim();
@@ -390,6 +399,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               }
             }
           } else {
+            console.log(`[pipeline] design.md -> sections: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
             const sectionsPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText);
             const sectionsRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs, 'Sections');
             sectionsText = sectionsRes.text.trim();
@@ -422,6 +432,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
           // Call 3: Components + Assumptions (sections 6–7)
           const sections1to5 = foundationText + '\n\n' + sectionsText;
+          console.log(`[pipeline] design.md -> components: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
           const componentsPrompt = buildComponentsUserPrompt(designMd, sections1to5);
           const componentsRes = await callWithContinuation(apiKey, BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 16000, imgs, 'Components');
           let componentsText = componentsRes.text.trim();
@@ -448,18 +459,57 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           buildMdHighAssumption = assumptionCount >= 40 || assumptionRatio > 0.5;
           console.log(`[BUILD.md] assumptions: ${assumptionCount}, confirmed: ${valueCount}, ratio: ${Math.round(assumptionRatio * 100)}%`);
 
-          // Part B2: Strip duplicate "Assumptions to Verify" headings — keep only the LAST one
+          // Part B2: Strip duplicate "Assumptions to Verify" blocks — keep only the LAST one.
+          // FIX 1: The block may appear as a markdown heading OR as a bold line (e.g.
+          //   **Assumptions to verify — consolidated index**
+          // ). Match both formats and strip everything from the heading/bold line up to
+          // the next markdown heading (or end of text).
           const assumptionHeadingRe = /^#{1,4}\s+Assumptions to Verify[^\n]*/gim;
+          const assumptionBoldRe = /^\*{2}[^*]*assumptions?\s+to\s+verify[^*]*\*{2}[^\n]*/gim;
           const headingMatches = [...fullBuildText.matchAll(assumptionHeadingRe)];
-          if (headingMatches.length > 1) {
-            console.warn(`[BUILD.md] ${headingMatches.length} "Assumptions to Verify" headings found — stripping all but the last`);
+          const boldMatches = [...fullBuildText.matchAll(assumptionBoldRe)];
+          const totalAssumptionBlocks = headingMatches.length + boldMatches.length;
+          if (totalAssumptionBlocks > 1) {
+            const formats = [];
+            if (headingMatches.length > 0) formats.push(`${headingMatches.length} heading`);
+            if (boldMatches.length > 0) formats.push(`${boldMatches.length} bold`);
+            console.warn(`[BUILD.md] ${totalAssumptionBlocks} "Assumptions to Verify" blocks found (${formats.join(', ')}) — stripping all but the last`);
           }
 
-          // Reassemble in order and strip duplicate assumption headings from foundation + sections blocks
-          const stripAssumptionHeadings = (text: string) =>
-            text.replace(/^#{1,4}\s+Assumptions to Verify[^\n]*\n([\s\S]*?)(?=^#|$(?!\n))/gim, '').trimEnd();
-          const cleanFoundation = headingMatches.length > 1 ? stripAssumptionHeadings(foundationText) : foundationText;
-          const cleanSections = headingMatches.length > 1 ? stripAssumptionHeadings(sectionsText) : sectionsText;
+          // Determine which format the LAST block uses so we can preserve it.
+          const lastHeading = headingMatches.length > 0 ? headingMatches[headingMatches.length - 1] : null;
+          const lastBold = boldMatches.length > 0 ? boldMatches[boldMatches.length - 1] : null;
+          const lastIsBold = lastBold !== null && (lastHeading === null || (lastBold.index! > lastHeading.index!));
+
+          // Strip function: removes assumption blocks (heading or bold) up to the next markdown heading or end of text.
+          const stripAssumptionBlocks = (text: string, preserveLastBold: boolean) => {
+            let result = text;
+            // Strip heading-format blocks
+            result = result.replace(/^#{1,4}\s+Assumptions to Verify[^\n]*\n([\s\S]*?)(?=^#{1,4}\s|$(?!\n))/gim, '');
+            // Strip bold-format blocks — optionally preserve the last one
+            const boldBlockRe = /^\*{2}[^*]*assumptions?\s+to\s+verify[^*]*\*{2}[^\n]*\n([\s\S]*?)(?=^#{1,4}\s|$(?!\n))/gim;
+            if (preserveLastBold) {
+              // Collect all bold-block matches, strip all except the last
+              const matches = [...result.matchAll(boldBlockRe)];
+              if (matches.length <= 1) return result.trimEnd();
+              // Rebuild by removing all but last
+              const lastIdx = matches[matches.length - 1].index!;
+              const lastLen = matches[matches.length - 1][0].length;
+              // Remove earlier matches from end to start to preserve indices
+              for (let m = matches.length - 2; m >= 0; m--) {
+                const match = matches[m];
+                result = result.slice(0, match.index!) + result.slice(match.index! + match[0].length);
+              }
+              return result.trimEnd();
+            } else {
+              result = result.replace(boldBlockRe, '');
+              return result.trimEnd();
+            }
+          };
+
+          const shouldStrip = totalAssumptionBlocks > 1;
+          const cleanFoundation = shouldStrip ? stripAssumptionBlocks(foundationText, lastIsBold) : foundationText;
+          const cleanSections = shouldStrip ? stripAssumptionBlocks(sectionsText, lastIsBold) : sectionsText;
 
           const assumptionWarning = buildMdHighAssumption
             ? `> \u26a0 ADVERTENCIA: ${assumptionCount} valores en este documento son SUPUESTOS, no extraídos del CSS del sitio.\n> Esta especificación es en gran parte una aproximación visual. Revisa la sección "Assumptions to Verify" antes de usarla.\n\n`

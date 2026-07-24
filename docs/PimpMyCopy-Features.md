@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.2 | Last Updated: 2026-07-24T22:30:00Z -->
+<!-- Version: 8.3 | Last Updated: 2026-07-25T00:15:00Z -->
 
 ---
 
@@ -1601,6 +1601,27 @@ All three BUILD_SPEC prompts now include: "If the supplied design.md contains a 
 
 - `BUILD_SPEC_FOUNDATION_PROMPT` and `BUILD_SPEC_SECTIONS_PROMPT` both state: "Do NOT write an 'Assumptions to Verify' section. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call."
 - The components call collects assumptions from ALL preceding segments, which it already receives as context.
+
+### Assumptions Strip — Bold Format Support (2026-07-25)
+
+**Fixed:** 2026-07-25 — The duplicate-assumptions stripper only matched markdown headings (`^#{1,4}\s+Assumptions to Verify`). A duplicate block formatted as bold text (e.g. `**Assumptions to verify — consolidated index**`) slipped through and appeared in the final BUILD.md.
+
+The strip logic now:
+
+- Matches BOTH markdown headings AND bold lines containing `/assumptions?\s+to\s+verify/i`.
+- Removes everything from the heading/bold line up to the next markdown heading (or end of text), for both formats.
+- Keeps only the LAST assumptions block regardless of whether it is a heading or bold.
+- Logs which format was stripped and how many blocks were found: `[BUILD.md] N "Assumptions to Verify" blocks found (X heading, Y bold) — stripping all but the last`.
+
+### design.md Pipeline Trace Logging (2026-07-25)
+
+**Added:** 2026-07-25 — Before each downstream LLM call that consumes `design.md` (foundation, sections, components), a console log now traces the design.md string being passed:
+
+```
+[pipeline] design.md -> {stage}: {length} chars, starts "{first 60 chars}"
+```
+
+This confirms the FULL generated design.md string reaches every downstream call — not a placeholder, truncated summary, or hardcoded stub. A search of the codebase confirmed no hardcoded stub design.md template exists. The blueprint call (which runs first, before design.md is generated) is also traced to make its actual inputs visible.
 
 ### design.md Blueprint Context (2026-07-24)
 
