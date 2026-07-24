@@ -30,6 +30,14 @@ Never emit a value and NOT FOUND for the same token. A token is either resolved 
 
 When a value is visually confirmed but has no CSS source, and you choose to supply it anyway, it MUST carry the /* ASSUMED — reason */ marker. Values without that marker are claims that the value was found in the CSS.
 
+The CSS context includes a media query list. Derive the Breakpoints table from it: collect every distinct min-width and max-width value, sort ascending, and report each with the number of rules using it as evidence, e.g.
+  | md | max-width: 767px | 214 rules |
+This is measurement from the CSS, not inference — report the actual values found rather than mapping them onto assumed sm/md/lg/xl names. If a site's breakpoints do not map cleanly onto four tiers, list all of them.
+
+Report whether breakpoints are min-width (mobile-first) or max-width (desktop-first), since a rebuild must follow the same direction.
+
+Only report NOT FOUND for breakpoints if the media query list is genuinely empty.
+
 ## SCREENSHOT USAGE
 
 You are given a full-page screenshot alongside the CSS. The page may arrive as MULTIPLE sequential vertical segments, top to bottom, with slight overlap between consecutive segments. On very long pages, the middle may be sampled rather than complete — some sections may not appear in any segment.
