@@ -745,7 +745,12 @@ ${hasCss ? combinedCss : '/* No CSS returned from any source */'}
 Generate the complete design.md file. Start with the Platform section using the detected values above. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }
 
-export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string, assetManifest?: string): string {
+export function buildBlueprintUserPrompt(
+  cleanedHtml: string,
+  designMd?: string,
+  assetManifest?: string,
+  designCopyMarkdown?: string,
+): string {
   const designContext = designMd
     ? `\n\nHere is the design.md generated from this same page. Use its resolved color tokens to populate background_color and text_color fields with real hex values:\n\n\`\`\`markdown\n${designMd}\n\`\`\``
     : '';
@@ -754,9 +759,13 @@ export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string,
     ? `\n\n${assetManifest}\n\nUse these absolute image URLs to populate the assets array for each section and the global_assets object. Match images to sections by their position and context in the HTML.`
     : '';
 
+  const copyOverride = designCopyMarkdown
+    ? `\n\n--- COPY SOURCE OVERRIDE ---\nThe page STRUCTURE (sections, layout, components) comes from the HTML above. However, populate each section's text_blocks using the content below, mapped by position order. If the design source has fewer text blocks than sections, mark the unmatched blocks as "[Reescribir: {role}]". Do not invent copy.\n\nContent from the design source:\n\`\`\`\n${designCopyMarkdown}\n\`\`\``
+    : '';
+
   return `Here is the raw HTML from the webpage. Extract all sections and globals:
 
-${cleanedHtml}${designContext}${assetContext}
+${cleanedHtml}${designContext}${assetContext}${copyOverride}
 
 Return a valid JSON object following the exact format in the system prompt. Include ALL sections in page order. Reproduce all visible text verbatim in the text_blocks arrays — do not summarise or shorten any text.`;
 }
