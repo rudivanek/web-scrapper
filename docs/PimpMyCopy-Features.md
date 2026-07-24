@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.19 | Last Updated: 2026-07-24T01:00:00Z -->
+<!-- Version: 1.20 | Last Updated: 2026-07-24T02:00:00Z -->
 
 ---
 
@@ -1270,6 +1270,142 @@ The following rules were added to the `DESIGN_SYSTEM_PROMPT` in `src/lib/prompts
 13. **Large CSS volume means search harder.** The prompt is told how many stylesheets were fetched and their total size. When a large volume of CSS was supplied and a common property still appears absent, that is a signal the model has not looked hard enough — it must search the frequency analysis before concluding the property is missing. Previously, the prompt would report NOT FOUND for properties that were present in the supplied CSS but not found by the model.
 
 14. **No consistent scale vs no values.** A site can declare hundreds of padding values with no systematic rhythm — that is a finding about the design system, not the same as the values being absent. The two must not be conflated. "No consistent scale" means the values exist but have no ratio; "no values" means the property was never declared. Previously, the prompt would report NOT FOUND when hundreds of values existed but had no pattern, confusing a design-system finding with an extraction gap.
+
+### Multi-Stack Platform Detection (2026-07-24)
+
+**Added:** 2026-07-24 — The design extractor now works on any stack (WordPress/Elementor, Webflow, Wix, Squarespace, Shopify, React/Next, Vue/Nuxt, Astro, Tailwind, Bootstrap, plain HTML) by detecting the platform deterministically and selecting a token-derivation strategy.
+
+#### Platform Detection (deterministic, no LLM)
+
+The `extract-css` edge function now returns a `platform` object alongside its existing diagnostics:
+
+```typescript
+interface PlatformDetection {
+  cms: 'wordpress' | 'webflow' | 'wix' | 'squarespace' | 'shopify' | null;
+  builder: 'elementor' | 'divi' | 'bricks' | 'beaver' | 'gutenberg' | null;
+  framework: 'react' | 'next' | 'vue' | 'nuxt' | 'astro' | 'svelte' | null;
+  cssApproach: 'custom-properties' | 'tailwind' | 'bootstrap' | 'css-modules' | 'plain' | 'unknown';
+  confidence: 'high' | 'medium' | 'low';
+  signals: string[];
+}
+```
+
+Detection is done by matching signals in the HTML and CSS:
+- **WordPress**: `/wp-content/`, `/wp-includes/`, meta generator "WordPress"
+- **Elementor**: `.elementor-kit-*`, `/elementor/css/post-`, class `elementor-`
+- **Divi**: `#et-boc`, `et_pb_` class prefix
+- **Bricks**: `brxe-` class prefix
+- **Beaver**: `fl-builder` / `fl-module` classes
+- **Gutenberg**: `wp-block-` class prefix (only when WordPress is detected and no other builder)
+- **Webflow**: meta generator "Webflow", `website-files.com` asset host, `.w-container` / `.w-form` / `w-webflow-badge` classes
+- **Wix**: `static.wixstatic.com`
+- **Squarespace**: `squarespace.com/universal`, `static1.squarespace.com`
+- **Shopify**: `cdn.shopify.com`, `Shopify.theme`
+- **Next.js**: `__NEXT_DATA__`, `/_next/static/`
+- **Nuxt**: `__NUXT__`
+- **Astro**: `astro-island`, `data-astro-`
+- **React (generic)**: `id="root"` or `id="__next"` with React hydration markers
+- **Tailwind**: CSS containing `--tw-` variables, OR >=20 class attributes matching `^(bg|text|border|rounded|px|py|mx|my|flex|grid|gap|w|h)-`
+- **Bootstrap**: `.container`/`.row`/`.col-` plus `btn btn-` in markup
+- **CSS Modules**: class names matching `/^[A-Za-z]+_[A-Za-z0-9]+__[a-z0-9]{5}$/`
+
+The `cssApproach` is decided by custom property count: >=15 custom properties → `custom-properties`; tailwind signals → `tailwind`; bootstrap signals → `bootstrap`; otherwise → `plain`.
+
+The detection result is logged in `DesignExtractor` and displayed in the UI above the results as a "Plataforma detectada" panel showing CMS, builder, framework, CSS approach, confidence level, and matched signals.
+
+#### False Degraded Warning Fix
+
+Previously, the `cssDegraded` flag fired when `customPropertyCount === 0`, which is correct for a WAF block but wrong for a site that legitimately has no token layer (e.g. plain HTML, Webflow). The flag now fires only when `sheetsFetchedOk === 0` OR any `sheetsFailed` entry has reason `html-response (likely WAF block)`. A site with 0 custom properties and healthy sheet fetches is NOT degraded — it is a `plain` cssApproach site.
+
+#### Value Frequency Analysis
+
+For sites without custom properties, the `extract-css` edge function now accumulates frequency data for:
+
+- **fontSizes** — every `font-size` value, with count
+- **fontFamilies** — every `font-family` value, with count
+- **spacings** — every `padding`/`margin`/`gap` value, with count (both shorthand and component values)
+- **radii** — every `border-radius` value, with count
+- **shadows** — every `box-shadow` value, with count
+- **fontWeights** — every `font-weight` value, with count
+
+Each entry includes `{ value, count, sampleSelectors: string[] (max 3) }`.
+
+Normalization before counting:
+- `rgb()`/`rgba()` with alpha=1 converted to hex
+- All hex lowercased
+- `0px` and `0` treated as identical
+- `rem`/`em` NOT converted to px — reported as declared
+
+Excluded from frequency analysis:
+- Stylesheets matching known vendor boilerplate: `/bootstrap(\.min)?\.css/`, `/normalize\.css/`, `/reset\.css/`, `/font-?awesome/`, `/swiper/`, `/slick/`, `/animate\.css/`
+- Selectors matching platform UI chrome: `^\.w-(form|input|button|webflow-badge|file-upload)`, `^\.wp-block-`, `^\.elementor-widget-container`
+
+Each category is sorted by count descending, capped at 30 entries, and passed to the design LLM under a `/* ─── Value frequency analysis (most-used values first) ─── */` block.
+
+#### Tailwind Utility Extraction
+
+When `cssApproach === 'tailwind'`, the edge function extracts every distinct utility class from the rendered HTML with an occurrence count, grouped by category:
+- **colors** — `bg-*`, `text-*`, `border-*`
+- **spacing** — `p-*`, `m-*`, `gap-*`, `space-*`
+- **typography** — `text-*`, `font-*`, `leading-*`, `tracking-*`
+- **radius** — `rounded-*`
+- **shadow** — `shadow-*`
+- **layout** — `flex`, `grid`, `grid-cols-*`, `order-*`, etc.
+- **arbitrary** — bracket syntax classes like `bg-[#4fb34f]` or `text-[17px]`
+
+Arbitrary bracket values are the highest-signal items on a Tailwind site because they are literal brand values. This data is passed to the design LLM under a `/* ─── Tailwind utility classes in use (with counts) ─── */` block.
+
+#### Conditional Stack-Specific Rules
+
+The `DESIGN_SYSTEM_PROMPT` now applies platform-specific rules conditionally rather than universally:
+
+- The `--wp--preset--*` exclusion applies only when `cms === 'wordpress'`
+- The `.elementor-kit-*` prioritisation applies only when `builder === 'elementor'`
+- **Webflow**: the single large stylesheet on the Webflow asset host is the design system; ignore `.w-*` platform UI classes entirely
+- **Next.js**: CSS chunks under `/_next/static/css/` hold the compiled system
+- **Plain**: there is no token layer; rely on frequency analysis
+
+#### Frequency-Derived Token Rules
+
+Added to `DESIGN_SYSTEM_PROMPT`:
+
+15. **Derive tokens from frequency when no custom properties exist.** When few or no CSS custom properties exist, derive the design system from the frequency analysis: the most frequently declared color is the dominant brand/text color; recurring font-size and spacing values reveal the real scale. State clearly that tokens were derived from usage frequency, and give the count as evidence, e.g. `--space-md: 24px; /* derived — declared 88 times across 41 selectors */`. Never present a derived token as a declared one.
+
+16. **Never populate token tables with rare one-off values.** A value used once on a marquee at a single breakpoint is not a spacing token. Rank by frequency and report dominant values. If the frequency analysis is empty, write NOT FOUND.
+
+17. **Tailwind utility classes are the design system.** Reconstruct tokens from Tailwind classes: `bg-slate-900` means the Tailwind slate-900 value, `text-lg` means the Tailwind lg font-size. Resolving default Tailwind scale names to their standard values is resolution, not fabrication. Arbitrary bracket values are literal and take priority over scale names. If a custom theme extension is evident from non-standard class names, report the class name and mark the value NOT FOUND — verify manually.
+
+#### Platform Section in design.md Output
+
+The output format now includes a "Platform" section at the top of design.md:
+
+```markdown
+## Platform
+
+| Property | Value |
+|----------|-------|
+| CMS | [cms or None] |
+| Builder | [builder or None] |
+| Framework | [framework or None] |
+| CSS Approach | [cssApproach] |
+| Token Source | [declared custom properties | derived from frequency analysis | Tailwind utility classes] |
+| Detection Signals | [list matched signals] |
+```
+
+#### `buildDesignUserPrompt` Signature Change
+
+The function now accepts additional parameters:
+
+```typescript
+export function buildDesignUserPrompt(
+  combinedCss: string,
+  platform?: PlatformDetection | null,
+  frequency?: FrequencyAnalysis | null,
+  tailwind?: TailwindUtilities | null,
+): string
+```
+
+The platform detection, frequency analysis, and Tailwind utility data are injected into the user prompt as structured comment blocks so the LLM has the detected stack and derived data as context.
 
 ---
 

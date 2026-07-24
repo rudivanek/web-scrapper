@@ -237,6 +237,39 @@ export interface CssSheet {
   isInline: boolean;
 }
 
+export interface FrequencyEntry {
+  value: string;
+  count: number;
+  sampleSelectors: string[];
+}
+
+export interface FrequencyAnalysis {
+  fontSizes: FrequencyEntry[];
+  fontFamilies: FrequencyEntry[];
+  spacings: FrequencyEntry[];
+  radii: FrequencyEntry[];
+  shadows: FrequencyEntry[];
+  fontWeights: FrequencyEntry[];
+}
+
+export interface TailwindUtilityGroup {
+  category: string;
+  classes: { className: string; count: number }[];
+}
+
+export interface TailwindUtilities {
+  groups: TailwindUtilityGroup[];
+}
+
+export interface PlatformDetection {
+  cms: string | null;
+  builder: string | null;
+  framework: string | null;
+  cssApproach: string;
+  confidence: string;
+  signals: string[];
+}
+
 export interface CssExtractResult {
   customProperties: CssCustomProperty[];
   colors: CssColorValue[];
@@ -245,6 +278,9 @@ export interface CssExtractResult {
   mediaQueries: CssMediaQuery[];
   sheets: CssSheet[];
   rawCss: Record<string, string>;
+  platform: PlatformDetection;
+  frequency: FrequencyAnalysis;
+  tailwind: TailwindUtilities | null;
 }
 
 export interface CssDiagnostics {

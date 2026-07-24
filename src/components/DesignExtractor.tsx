@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye } from 'lucide-react';
-import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics } from '../lib/firecrawl';
+import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callClaude } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
@@ -27,6 +27,7 @@ interface ExtractionResult {
   screenshotAvailable: boolean;
   externalSheets: number;
   cssDegraded: boolean;
+  platform: PlatformDetection | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -268,8 +269,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       if (cssData?.diagnostics) {
         console.log('[extract-css] diagnostics:', cssData.diagnostics);
       }
+      if (cssData?.platform) {
+        console.log('[extract-css] platform:', cssData.platform);
+      }
       const externalSheets = cssData?.sheets?.length ?? 0;
-      const cssDegraded = !cssData || cssData.diagnostics.sheetsFetchedOk === 0 || cssData.diagnostics.customPropertyCount === 0 || cssData.diagnostics.sheetsFailed.some(f => f.reason === 'html-response (likely WAF block)');
+      const cssDegraded = !cssData || cssData.diagnostics.sheetsFetchedOk === 0 || cssData.diagnostics.sheetsFailed.some(f => f.reason === 'html-response (likely WAF block)');
+      const platform = cssData?.platform ?? null;
+      const frequency = cssData?.frequency ?? null;
+      const tailwind = cssData?.tailwind ?? null;
       const combinedCss = buildCombinedCss(cssData, cssBlocks, inlineStyles);
 
       // Prepare screenshot segments for Claude vision
@@ -280,7 +287,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Phase 4: LLM Call A — design.md (with screenshot segments)
       setPhase('llm-design', 'Generating design.md with Claude...', 45);
-      const designUserPrompt = buildDesignUserPrompt(combinedCss);
+      const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind);
       const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
       // Phase 5: LLM Call B — blueprint JSON (with screenshot segments + design.md as context)
@@ -299,7 +306,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded });
+      setResult({ designMd, blueprintJson, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -451,6 +458,57 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>Advertencia: no se pudieron leer las hojas de estilo del sitio (posible bloqueo del servidor). El análisis de diseño está incompleto — verifica los valores manualmente.</span>
+            </div>
+          )}
+
+          {/* Platform detection */}
+          {result.platform && (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-3">
+                <Layers className="w-4 h-4 text-gray-600" />
+                <h4 className="text-sm font-semibold text-gray-800">Plataforma detectada</h4>
+                <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${
+                  result.platform.confidence === 'high' ? 'bg-green-100 text-green-700' :
+                  result.platform.confidence === 'medium' ? 'bg-amber-100 text-amber-700' :
+                  'bg-gray-100 text-gray-600'
+                }`}>
+                  {result.platform.confidence} confidence
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                {result.platform.cms && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide">CMS</dt>
+                    <dd className="font-medium text-gray-800 capitalize">{result.platform.cms}</dd>
+                  </div>
+                )}
+                {result.platform.builder && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Builder</dt>
+                    <dd className="font-medium text-gray-800 capitalize">{result.platform.builder}</dd>
+                  </div>
+                )}
+                {result.platform.framework && (
+                  <div>
+                    <dt className="text-xs text-gray-500 uppercase tracking-wide">Framework</dt>
+                    <dd className="font-medium text-gray-800 capitalize">{result.platform.framework}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-xs text-gray-500 uppercase tracking-wide">CSS Approach</dt>
+                  <dd className="font-medium text-gray-800 capitalize">{result.platform.cssApproach.replace('-', ' ')}</dd>
+                </div>
+              </div>
+              {result.platform.signals.length > 0 && (
+                <ul className="mt-3 space-y-1 text-xs text-gray-500">
+                  {result.platform.signals.map((sig, i) => (
+                    <li key={i} className="flex items-start gap-1.5">
+                      <span className="text-gray-400 mt-0.5">•</span>
+                      <span>{sig}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

@@ -1,8 +1,21 @@
+import type { PlatformDetection, FrequencyAnalysis, TailwindUtilities, FrequencyEntry } from '../lib/firecrawl';
+
 export const DESIGN_SYSTEM_PROMPT = `You are a precision design system analyst. You will receive:
 1. Raw HTML including <style> tags and inline styles from the target website
 2. A full-page screenshot of the rendered website
+3. A platform detection result telling you the CMS, builder, framework, and CSS approach
+4. A value frequency analysis (most-used values across the CSS) when few or no custom properties exist
+5. A Tailwind utility class list when the site uses Tailwind
 
-CSS arrives from two sources: external stylesheets fetched directly from the site, and inline <style> blocks and style= attributes. Both are equally authoritative. External stylesheet custom properties are usually the real design system — on Elementor sites look for .elementor-kit-* blocks, and on WordPress themes look for theme :root blocks. Continue ignoring all --wp--preset--* values as platform boilerplate.
+CSS arrives from two sources: external stylesheets fetched directly from the site, and inline <style> blocks and style= attributes. Both are equally authoritative.
+
+The platform detection tells you how to read the CSS. Follow the conditional rules below based on the detected stack:
+- When cms === 'wordpress': ignore all --wp--preset--* values as platform boilerplate.
+- When builder === 'elementor': the .elementor-kit-* block is the PRIMARY design system — prioritize it over :root.
+- When cms === 'webflow': the single large stylesheet on the Webflow asset host is the design system; ignore .w-* platform UI classes entirely.
+- When framework === 'next': CSS chunks under /_next/static/css/ hold the compiled system.
+- When cssApproach === 'plain': there is no token layer; rely on the frequency analysis.
+- When cssApproach === 'tailwind': the utility classes ARE the design system (see Tailwind section below).
 
 Resolve every var(--x) chain to a final hex or px value, following references across BOTH external and inline sources. A variable defined in an external stylesheet and consumed inline must still be resolved.
 
@@ -71,7 +84,15 @@ When a value is missing, report that it is missing. Do NOT speculate about WHY. 
 
 You are told how many stylesheets were fetched and their total size. When a large volume of CSS was supplied and a common property still appears absent, that is a signal you have not looked hard enough — search the frequency analysis before concluding the property is missing.
 
-Distinguish 'no consistent SCALE' from 'no VALUES'. A site can declare hundreds of padding values with no systematic rhythm. That is a finding about the design system. It is NOT the same as the values being absent, and the two must not be conflated.
+Distinguish 'no consistent SCALE' from 'no VALUES'. A site can declare hundreds of padding values with no systematic rhythm. That is a finding about the design system. It is NOT the same as the values being absent, and the two must not be conflate.
+
+When few or no CSS custom properties exist, the site has no explicit token layer. Derive the design system from the frequency analysis instead: the most frequently declared color is almost always the dominant brand or text color; recurring font-size and spacing values reveal the real scale. State clearly in design.md that tokens were derived from usage frequency rather than declared variables, and give the count as evidence, e.g.
+  --space-md: 24px;  /* derived — declared 88 times across 41 selectors */
+This is measurement, not fabrication. Never present a derived token as a declared one.
+
+NEVER populate a token table with rare or decorative one-off values just because they were the only ones visible. A value used once on a marquee at a single breakpoint is not a spacing token. Rank by frequency and report the dominant values. If the frequency analysis is empty, write NOT FOUND.
+
+If the site uses Tailwind, the utility classes ARE the design system. Reconstruct tokens from them: bg-slate-900 means the Tailwind slate-900 value, text-lg means the Tailwind lg font-size. Resolving default Tailwind scale names to their standard values is resolution, not fabrication, because the scale is fixed and public. Arbitrary bracket values are literal and take priority over scale names. If a custom theme extension is evident from non-standard class names, report the class name and mark the value NOT FOUND — verify manually.
 
 ## SCREENSHOT USAGE
 
@@ -173,6 +194,17 @@ Every uncommented declaration must be a real, valid CSS value. The NOT FOUND mar
 ## OUTPUT FORMAT (follow exactly):
 
 # Design System: [Brand Name]
+
+## Platform
+
+| Property | Value |
+|----------|-------|
+| CMS | [cms or None] |
+| Builder | [builder or None] |
+| Framework | [framework or None] |
+| CSS Approach | [cssApproach] |
+| Token Source | [declared custom properties | derived from frequency analysis | Tailwind utility classes] |
+| Detection Signals | [list matched signals] |
 
 ## Color Palette
 
@@ -453,16 +485,54 @@ Return ONLY valid JSON with this exact structure:
 - background_tone is populated from the screenshot when the exact hex is unknown — it captures what the screenshot legitimately shows (dark/light/mid) without inventing precision
 - Return ONLY the JSON object, no markdown fences, no explanation`;
 
-export function buildDesignUserPrompt(combinedCss: string): string {
+export function buildDesignUserPrompt(
+  combinedCss: string,
+  platform?: PlatformDetection | null,
+  frequency?: FrequencyAnalysis | null,
+  tailwind?: TailwindUtilities | null,
+): string {
   const hasCss = combinedCss.trim().length > 0;
+
+  const platformBlock = platform
+    ? `\n\n/* ─── Platform detection ─── */\nDetected CMS: ${platform.cms ?? 'none'}\nDetected Builder: ${platform.builder ?? 'none'}\nDetected Framework: ${platform.framework ?? 'none'}\nCSS Approach: ${platform.cssApproach}\nConfidence: ${platform.confidence}\nMatched signals:\n${platform.signals.map(s => `  - ${s}`).join('\n')}`
+    : '';
+
+  let freqBlock = '';
+  if (frequency) {
+    const formatFreq = (label: string, entries: FrequencyEntry[]) => {
+      if (entries.length === 0) return '';
+      const rows = entries.map(e => `  ${e.value} (${e.count}× — ${e.sampleSelectors[0] ?? ''})`).join('\n');
+      return `\n  ${label}:\n${rows}`;
+    };
+    const freqText = [
+      formatFreq('Font sizes', frequency.fontSizes),
+      formatFreq('Font families', frequency.fontFamilies),
+      formatFreq('Font weights', frequency.fontWeights),
+      formatFreq('Spacings', frequency.spacings),
+      formatFreq('Border radii', frequency.radii),
+      formatFreq('Box shadows', frequency.shadows),
+    ].filter(Boolean).join('\n');
+    if (freqText) {
+      freqBlock = `\n\n/* ─── Value frequency analysis (most-used values first) ─── */${freqText}`;
+    }
+  }
+
+  let tailwindBlock = '';
+  if (tailwind && tailwind.groups.length > 0) {
+    const groupText = tailwind.groups.map(g => {
+      const classes = g.classes.map(c => `  ${c.className} (${c.count}×)`).join('\n');
+      return `  ${g.category}:\n${classes}`;
+    }).join('\n');
+    tailwindBlock = `\n\n/* ─── Tailwind utility classes in use (with counts) ─── */\n${groupText}`;
+  }
 
   return `Here is the CSS extracted from the page (external stylesheets, inline <style> blocks, and style= attributes)${hasCss ? '' : ' (NONE FOUND — no CSS was retrieved from any source)'}:
 
 \`\`\`css
 ${hasCss ? combinedCss : '/* No CSS returned from any source */'}
-\`\`\`
+\`\`\`${platformBlock}${freqBlock}${tailwindBlock}
 
-Generate the complete design.md file. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
+Generate the complete design.md file. Start with the Platform section using the detected values above. For every token where the data above provides no evidence, write exactly: NOT FOUND — verify manually. Do not invent, estimate, or substitute any value. Use the screenshot to verify and disambiguate, never to invent.`;
 }
 
 export function buildBlueprintUserPrompt(cleanedHtml: string, designMd?: string): string {
