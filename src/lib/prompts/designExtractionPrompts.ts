@@ -543,7 +543,7 @@ Para cada combinación de color de texto y color de fondo ya identificada en est
 
 Reglas:
 - Calcula solo para combinaciones que OCURRAN JUNTAS en esta página. No emparejes un color de texto de un alcance de plantilla con un fondo de otro. Si no puedes establecer que una combinación se renderiza junta, omítela completamente en lugar de reportar un fallo. Un hallazgo de accesibilidad falso es peor que ninguno — daña la confianza del cliente.
-- Caso específico a evitar: no emparrajes un color de una plantilla (e.g. `.p.sei`, `.p.in`) con un fondo de otra. Si los dos colores provienen de reglas con prefijos de plantilla distintos, son de vistas diferentes y no coexisten en la misma página.
+- Caso específico a evitar: no emparrajes un color de una plantilla (e.g. ".p.sei", ".p.in") con un fondo de otra. Si los dos colores provienen de reglas con prefijos de plantilla distintos, son de vistas diferentes y no coexisten en la misma página.
 - Calcula solo para combinaciones ya documentadas arriba. No inventes combinaciones.
 - Omite cualquier combinación donde algún color sea NOT FOUND.
 - Para colores semi-transparentes, compón sobre el fondo indicado primero y nota que el resultado es compuesto.
