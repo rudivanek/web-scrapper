@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.3 | Last Updated: 2026-07-25T00:15:00Z -->
+<!-- Version: 8.4 | Last Updated: 2026-07-25T01:00:00Z -->
 
 ---
 
@@ -1622,6 +1622,60 @@ The strip logic now:
 ```
 
 This confirms the FULL generated design.md string reaches every downstream call — not a placeholder, truncated summary, or hardcoded stub. A search of the codebase confirmed no hardcoded stub design.md template exists. The blueprint call (which runs first, before design.md is generated) is also traced to make its actual inputs visible.
+
+### Dual-URL Mode — Design Source + Structure Source (2026-07-25)
+
+**Added:** 2026-07-25 — The Design Extractor now supports sourcing the design system from one URL (URL A) and the page structure (sections, layout, copy, images) from a different URL (URL B). When URL B is empty, behaviour is exactly as before — a single URL for everything.
+
+#### UI Changes
+
+- The existing URL field is relabeled "URL de diseño".
+- A new optional field "URL de estructura (opcional)" appears below it with placeholder "Déjalo vacío para usar la misma URL para todo".
+- When both URLs are filled and differ, a copy-source control appears: "¿De dónde viene el texto de la página?" with two radio options:
+  - "De la página de estructura (URL B) — por defecto" (`copySource = 'structure'`) — uses B's verbatim text
+  - "Dejar como marcador para reescribir con CopyZap" (`copySource = 'placeholder'`) — replaces each text block's content with "[Reescribir: {role}]" and sets `needs_rewrite: true` on each section
+- The structure URL is validated as a URL when non-empty; submit is blocked on invalid input with an inline error message.
+
+#### Pipeline Routing (A = design URL, B = structure URL)
+
+When B is empty, the pipeline runs exactly as before with a single URL. When A and B differ:
+
+- **DESIGN**: extract-css + platform detection + design.md generation run against URL A only.
+- **STRUCTURE**: blueprint extraction (sections, layout_contract, screenshot segmentation) runs against URL B only.
+- **ASSETS**: the asset manifest always comes from URL B — images belong to the page being rebuilt, never the design donor.
+- **COPY** (text_blocks) depends on `copySource`:
+  - `'structure'` (default): B's copy is used verbatim.
+  - `'placeholder'`: B's section structure is preserved, but each text block's content is replaced with "[Reescribir: {role}]" and `needs_rewrite: true` is set on each section, so CopyZap can target them.
+- **BUILD.md**: runs as before, consuming design.md (from A) + blueprint.json (from B).
+
+The pipeline scrapes URL A and URL B separately (two Firecrawl calls), each fetching rawHtml + screenshot@fullPage. CSS extraction and external stylesheet fetching run against URL A. A second platform detection runs against URL B for the mismatch warning (see Provenance below).
+
+The progress bar adapts: in dual-URL mode it shows 6 phases (scrape-design, scrape-structure, fetch-css, blueprint, design.md, BUILD.md); in single-URL mode it shows the original 5.
+
+#### Provenance
+
+When A ≠ B, provenance lines are injected into all three output files:
+
+- **design.md**: prepended with `> Sistema de diseño de {A}. Estructura y contenido de {B}.` (or `> Estructura de {B}; texto pendiente de reescritura.` in placeholder mode).
+- **blueprint.json**: a `_provenance` field is added at the top level with the same line.
+- **BUILD.md**: the provenance line plus a warning are prepended: `> Advertencia: diseño y estructura provienen de sitios distintos. Verifica que los colores y tipografía tengan sentido aplicados a estas secciones.`
+
+The provenance line is also displayed in the UI above the results in a blue info box.
+
+When A ≠ B and their detected platforms differ (e.g. URL A is WordPress/Elementor and URL B is Webflow), an amber informational note appears: "Nota: los dos sitios usan tecnologías distintas; la reconstrucción es una aproximación de diseño." This is informational, not a blocker.
+
+#### Degraded Design Source Guard
+
+When URL A's CSS comes back degraded (`cssLooksInsufficient` or the dynamic-CSS warning fires), the existing red warning is shown with an additional note in dual-URL mode: "La fuente de diseño (URL A) no produjo CSS utilizable. BUILD.md se basará mayormente en supuestos sin importar la calidad de la estructura (URL B)." A failed design source means BUILD.md is mostly assumptions regardless of how good B's structure is.
+
+#### What Did NOT Change
+
+- Single-URL behaviour when the structure field is empty — identical to before.
+- extract-css, platform detection, frequency analysis, Rule 0 — unchanged.
+- The asset manifest logic — only its source URL is pinned to B; the extraction algorithm itself is unchanged.
+- BUILD.md call split, truncation guard, ratio warning — unchanged.
+
+---
 
 ### design.md Blueprint Context (2026-07-24)
 

@@ -41,6 +41,9 @@ interface ExtractionResult {
   insufficientReasons: string[];
   platform: PlatformDetection | null;
   buildTarget: BuildTarget;
+  provenance: string | null;
+  platformMismatch: boolean;
+  platformMismatchNote: string | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -58,6 +61,19 @@ function downloadFile(content: string, filename: string, mime: string) {
 function hostname(url: string): string {
   try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, ''); }
   catch { return url; }
+}
+
+function normalizeUrl(s: string): string {
+  const t = s.trim();
+  return t.startsWith('http') ? t : `https://${t}`;
+}
+
+function isValidUrl(s: string): boolean {
+  if (!s.trim()) return true;
+  try {
+    const u = new URL(normalizeUrl(s));
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
 }
 
 const MAX_COMBINED_CSS = 120000;
@@ -241,45 +257,76 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [localApiKey, setLocalApiKey] = useState<string | null>(null);
   const [buildTarget, setBuildTarget] = useState<BuildTarget>('react-tailwind');
+  const [structureUrl, setStructureUrl] = useState('');
+  const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
+  const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
 
   const resolvedKey = localApiKey || anthropicKey || null;
+  const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
 
   const setPhase = (phase: ExtractionState['phase'], message: string, progress: number) => {
     setState({ phase, message, progress });
   };
 
   const runExtraction = async (apiKey: string) => {
-    const normalized = url.trim().startsWith('http') ? url.trim() : `https://${url.trim()}`;
+    const designUrl = normalizeUrl(url);
+    const structUrl = structureUrl.trim() ? normalizeUrl(structureUrl) : designUrl;
+    const dual = designUrl !== structUrl;
+    const copySrc = dual ? copySource : 'structure';
+
     setError(null);
     setResult(null);
 
     try {
-      // Phase 1: Structure scrape with screenshot (moved before design LLM call)
-      setPhase('scrape-structure', 'Running structure scrape (rawHtml + screenshot)...', 10);
-      const structureScrape = await callFirecrawl({
-        endpoint: '/v1/scrape',
-        method: 'POST',
-        body: {
-          url: normalized,
-          formats: ['rawHtml', 'screenshot@fullPage'],
-          onlyMainContent: false,
-        },
-      });
+      let designRawHtml = '';
+      let designScreenshot: string | null = null;
+      let structureRawHtml = '';
+      let structureScreenshot: string | null = null;
 
-      const rawHtml: string = structureScrape?.data?.rawHtml ?? structureScrape?.rawHtml ?? '';
-      const screenshot: string | null = structureScrape?.data?.screenshot ?? structureScrape?.screenshot ?? null;
+      if (dual) {
+        setPhase('scrape-design', `Scraping design source (${hostname(designUrl)})...`, 5);
+        const designScrape = await callFirecrawl({
+          endpoint: '/v1/scrape',
+          method: 'POST',
+          body: { url: designUrl, formats: ['rawHtml', 'screenshot@fullPage'], onlyMainContent: false },
+        });
+        designRawHtml = designScrape?.data?.rawHtml ?? designScrape?.rawHtml ?? '';
+        designScreenshot = designScrape?.data?.screenshot ?? designScrape?.screenshot ?? null;
+
+        setPhase('scrape-structure', `Scraping structure source (${hostname(structUrl)})...`, 15);
+        const structureScrape = await callFirecrawl({
+          endpoint: '/v1/scrape',
+          method: 'POST',
+          body: { url: structUrl, formats: ['rawHtml', 'screenshot@fullPage'], onlyMainContent: false },
+        });
+        structureRawHtml = structureScrape?.data?.rawHtml ?? structureScrape?.rawHtml ?? '';
+        structureScreenshot = structureScrape?.data?.screenshot ?? structureScrape?.screenshot ?? null;
+      } else {
+        setPhase('scrape-structure', 'Running structure scrape (rawHtml + screenshot)...', 10);
+        const structureScrape = await callFirecrawl({
+          endpoint: '/v1/scrape',
+          method: 'POST',
+          body: { url: designUrl, formats: ['rawHtml', 'screenshot@fullPage'], onlyMainContent: false },
+        });
+        designRawHtml = structureRawHtml = structureScrape?.data?.rawHtml ?? structureScrape?.rawHtml ?? '';
+        designScreenshot = structureScreenshot = structureScrape?.data?.screenshot ?? structureScrape?.screenshot ?? null;
+      }
+
+      const screenshot = structureScreenshot;
 
       // Phase 2: Pre-process HTML
-      const { cleanedHtml, cssBlocks, inlineStyles } = preprocessHtml(rawHtml);
+      // Blueprint uses structure source (B); CSS blocks/inline styles use design source (A)
+      const { cleanedHtml } = preprocessHtml(structureRawHtml);
+      const { cssBlocks, inlineStyles } = preprocessHtml(designRawHtml);
 
-      // Phase 2b: Extract asset manifest from raw HTML (before cleaning)
-      const assetManifest = extractAssetManifest(rawHtml, normalized);
+      // Phase 2b: Extract asset manifest from structure HTML (B) — images belong to the page being rebuilt
+      const assetManifest = extractAssetManifest(structureRawHtml, structUrl);
 
-      // Phase 3: Fetch external stylesheets (pass Firecrawl's rawHtml to avoid a separate fetch)
+      // Phase 3: Fetch external stylesheets from design source (A)
       setPhase('fetch-css', 'Descargando hojas de estilo externas...', 25);
       let cssData: CssExtractResultWithDiagnostics | null = null;
       try {
-        cssData = await extractCssData(normalized, rawHtml || undefined);
+        cssData = await extractCssData(designUrl, designRawHtml || undefined);
       } catch (e) {
         console.warn('extractCssData failed, continuing with inline CSS only:', e);
       }
@@ -298,17 +345,33 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       const tailwind = cssData?.tailwind ?? null;
       const combinedCss = buildCombinedCss(cssData, cssBlocks, inlineStyles);
 
-      // Enrich asset manifest with background images from fetched external CSS
+      // Platform detection for structure source (B) — for mismatch warning + asset enrichment
+      let structurePlatform: PlatformDetection | null = null;
+      let structureRawCss: Record<string, string> | null = null;
+      if (dual) {
+        try {
+          const structCssData = await extractCssData(structUrl, structureRawHtml || undefined);
+          structurePlatform = structCssData?.platform ?? null;
+          structureRawCss = structCssData?.rawCss ?? null;
+        } catch { /* best-effort platform detection */ }
+      }
+
+      // Enrich asset manifest with background images — always from B (structure source)
       let enrichedManifest = assetManifest;
-      if (cssData?.rawCss) {
-        enrichedManifest = enrichManifestWithCss(assetManifest, cssData.rawCss, normalized);
+      const rawCssForEnrichment: Record<string, string> | null = dual ? structureRawCss : (cssData?.rawCss ?? null);
+      if (rawCssForEnrichment) {
+        enrichedManifest = enrichManifestWithCss(assetManifest, rawCssForEnrichment, structUrl);
       }
       const assetManifestText = formatAssetManifestForPrompt(enrichedManifest);
 
-      // Prepare screenshot segments for Claude vision
+      // Prepare screenshot segments — blueprint uses B's screenshot, design uses A's
       let screenshotSegments: string[] = [];
-      if (screenshot) {
-        screenshotSegments = await prepareScreenshot(screenshot);
+      if (structureScreenshot) {
+        screenshotSegments = await prepareScreenshot(structureScreenshot);
+      }
+      let designScreenshotSegments = screenshotSegments;
+      if (dual && designScreenshot && designScreenshot !== structureScreenshot) {
+        designScreenshotSegments = await prepareScreenshot(designScreenshot);
       }
 
       // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
@@ -332,12 +395,59 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         blueprintJson = blueprintRaw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
       }
 
-      // Phase 5: LLM Call B — design.md (with screenshot segments + blueprint.json as context)
+      // Post-blueprint: replace copy with placeholders if requested
+      if (dual && copySrc === 'placeholder') {
+        try {
+          const bpParsed = JSON.parse(blueprintJson);
+          if (Array.isArray(bpParsed.sections)) {
+            bpParsed.sections.forEach((s: { text_blocks?: Array<{ role: string; content: string }> }) => {
+              if (Array.isArray(s.text_blocks)) {
+                s.text_blocks.forEach((tb) => {
+                  tb.content = `[Reescribir: ${tb.role}]`;
+                });
+              }
+              (s as Record<string, unknown>).needs_rewrite = true;
+            });
+          }
+          blueprintJson = JSON.stringify(bpParsed, null, 2);
+          console.log('[pipeline] copySource=placeholder — text_blocks replaced with [Reescribir] markers');
+        } catch { /* keep original blueprint */ }
+      }
+
+      // Phase 5: LLM Call B — design.md (from design source A, with B's blueprint as context)
       setPhase('llm-design', 'Generating design.md with Claude...', 70);
       const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, blueprintJson, cssLooksInsufficient);
-      const designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
-      // FIX 2: trace — log the FULL generated design.md string so we can confirm it is real content, not a stub.
+      let designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, designScreenshotSegments.length > 0 ? designScreenshotSegments : undefined);
       console.log(`[pipeline] design.md generated: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
+
+      // Provenance injection
+      let provenanceLine: string | null = null;
+      if (dual) {
+        provenanceLine = copySrc === 'placeholder'
+          ? `Estructura de ${structUrl}; texto pendiente de reescritura.`
+          : `Sistema de diseño de ${designUrl}. Estructura y contenido de ${structUrl}.`;
+      }
+
+      if (provenanceLine) {
+        designMd = `> ${provenanceLine}\n\n${designMd}`;
+        try {
+          const bpParsedProv = JSON.parse(blueprintJson);
+          bpParsedProv._provenance = provenanceLine;
+          blueprintJson = JSON.stringify(bpParsedProv, null, 2);
+        } catch { /* keep original */ }
+      }
+
+      // Platform mismatch detection
+      let platformMismatch = false;
+      let platformMismatchNote: string | null = null;
+      if (dual && platform && structurePlatform) {
+        const aKey = `${platform.cms ?? ''}|${platform.builder ?? ''}|${platform.framework ?? ''}`;
+        const bKey = `${structurePlatform.cms ?? ''}|${structurePlatform.builder ?? ''}|${structurePlatform.framework ?? ''}`;
+        if (aKey !== bKey) {
+          platformMismatch = true;
+          platformMismatchNote = 'Nota: los dos sitios usan tecnologías distintas; la reconstrucción es una aproximación de diseño.';
+        }
+      }
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
       // Generated in three sequential calls to avoid truncation:
@@ -493,8 +603,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               const matches = [...result.matchAll(boldBlockRe)];
               if (matches.length <= 1) return result.trimEnd();
               // Rebuild by removing all but last
-              const lastIdx = matches[matches.length - 1].index!;
-              const lastLen = matches[matches.length - 1][0].length;
               // Remove earlier matches from end to start to preserve indices
               for (let m = matches.length - 2; m >= 0; m--) {
                 const match = matches[m];
@@ -516,14 +624,17 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             : '';
 
           // A2: Concatenate with fixed header prepended once (using cleaned foundation/sections if duplicates were stripped)
-          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${assumptionWarning}${cleanFoundation}\n\n${cleanSections}\n\n${componentsText}`;
+          const provenanceBlock = provenanceLine
+            ? `> ${provenanceLine}\n\n> Advertencia: diseño y estructura provienen de sitios distintos. Verifica que los colores y tipografía tengan sentido aplicados a estas secciones.\n\n`
+            : '';
+          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${provenanceBlock}${assumptionWarning}${cleanFoundation}\n\n${cleanSections}\n\n${componentsText}`;
         } catch (e) {
           console.warn('BUILD.md generation failed — delivering design.md and blueprint.json only:', e);
         }
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -533,6 +644,11 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
   const handleExtract = () => {
     if (!url.trim()) return;
+    if (structureUrl.trim() && !isValidUrl(structureUrl)) {
+      setStructureUrlError('URL de estructura inválida — revisa el formato');
+      return;
+    }
+    setStructureUrlError(null);
     if (!resolvedKey) {
       setShowApiKeyModal(true);
       return;
@@ -547,15 +663,24 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   };
 
   const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
-  const site = hostname(url);
+  const site = hostname(structureUrl.trim() || url);
 
-  const phases: Array<{ key: ExtractionState['phase']; label: string }> = [
-    { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
-    { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
-    { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
-    { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON (Claude)' },
-    { key: 'llm-buildspec', label: 'Phase 5 — Generate BUILD.md (Claude)' },
-  ];
+  const phases: Array<{ key: ExtractionState['phase']; label: string }> = isDualUrl
+    ? [
+        { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
+        { key: 'scrape-structure', label: 'Phase 2 — Scrape structure source (URL B)' },
+        { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
+        { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON from URL B (Claude)' },
+        { key: 'llm-design', label: 'Phase 5 — Generate design.md from URL A (Claude)' },
+        { key: 'llm-buildspec', label: 'Phase 6 — Generate BUILD.md (Claude)' },
+      ]
+    : [
+        { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
+        { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
+        { key: 'llm-blueprint', label: 'Phase 3 — Generate blueprint JSON (Claude)' },
+        { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
+        { key: 'llm-buildspec', label: 'Phase 5 — Generate BUILD.md (Claude)' },
+      ];
 
   const currentPhaseIdx = phases.findIndex(p => p.key === state.phase);
 
@@ -577,27 +702,78 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       </div>
 
       {/* Input */}
-      <div className="mb-8 flex gap-3">
-        <input
-          type="text"
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
-          placeholder="https://example.com"
-          disabled={isRunning}
-          className="flex-1 border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
-        />
-        <button
-          onClick={handleExtract}
-          disabled={isRunning || !url.trim()}
-          className="px-6 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 shrink-0"
-        >
-          {isRunning ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /><span>Extracting...</span></>
-          ) : (
-            <><Palette className="w-4 h-4" /><span>Extract Design</span></>
+      <div className="mb-8 space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">URL de diseño</label>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
+              placeholder="https://example.com"
+              disabled={isRunning}
+              className="flex-1 border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
+            />
+            <button
+              onClick={handleExtract}
+              disabled={isRunning || !url.trim()}
+              className="px-6 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2 shrink-0"
+            >
+              {isRunning ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /><span>Extracting...</span></>
+              ) : (
+                <><Palette className="w-4 h-4" /><span>Extract Design</span></>
+              )}
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">URL de estructura (opcional)</label>
+          <input
+            type="text"
+            value={structureUrl}
+            onChange={e => setStructureUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
+            placeholder="Déjalo vacío para usar la misma URL para todo"
+            disabled={isRunning}
+            className="w-full border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
+          />
+          {structureUrlError && (
+            <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
           )}
-        </button>
+        </div>
+        {isDualUrl && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-sm font-medium text-gray-700 mb-2">¿De dónde viene el texto de la página?</p>
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="copySource"
+                  value="structure"
+                  checked={copySource === 'structure'}
+                  onChange={() => setCopySource('structure')}
+                  disabled={isRunning}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm text-gray-700">De la página de estructura (URL B) — por defecto</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="copySource"
+                  value="placeholder"
+                  checked={copySource === 'placeholder'}
+                  onChange={() => setCopySource('placeholder')}
+                  disabled={isRunning}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm text-gray-700">Dejar como marcador para reescribir con CopyZap</span>
+              </label>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Build target selector */}
@@ -672,7 +848,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
                 <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
                 <span className="ml-2 text-xs text-gray-400 font-mono truncate flex items-center space-x-1.5">
                   <Eye className="w-3 h-3" />
-                  <span>{url}</span>
+                  <span>{structureUrl.trim() || url}</span>
                 </span>
               </div>
               <img src={result.screenshot} alt="Page screenshot" className="w-full object-cover max-h-64" />
@@ -695,6 +871,21 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
+          {/* Provenance line (dual-URL mode) */}
+          {result.provenance && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+              {result.provenance}
+            </div>
+          )}
+
+          {/* Platform mismatch note (dual-URL mode) */}
+          {result.platformMismatch && result.platformMismatchNote && (
+            <div className="flex items-start space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{result.platformMismatchNote}</span>
+            </div>
+          )}
+
           {/* CSS extraction degraded warning */}
           {result.cssDegraded && !result.cssLooksInsufficient && (
             <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -711,6 +902,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
                 <div>
                   <p className="font-semibold mb-1">Advertencia: el sitio carga sus estilos dinámicamente (JavaScript).</p>
                   <p>Solo se capturó una parte mínima del CSS. El análisis de diseño NO es confiable — los valores deben verificarse manualmente.</p>
+                  {result.provenance && (
+                    <p className="mt-1 font-medium">La fuente de diseño (URL A) no produjo CSS utilizable. BUILD.md se basará mayormente en supuestos sin importar la calidad de la estructura (URL B).</p>
+                  )}
                   {result.insufficientReasons.length > 0 && (
                     <ul className="mt-2 space-y-0.5 text-xs text-orange-700">
                       {result.insufficientReasons.map((r, i) => (
