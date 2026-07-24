@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.25 | Last Updated: 2026-07-24T21:00:00Z -->
+<!-- Version: 8.0 | Last Updated: 2026-07-24T21:00:00Z -->
 
 ---
 
