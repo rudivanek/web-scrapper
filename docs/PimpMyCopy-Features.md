@@ -1471,7 +1471,7 @@ Before HTML cleaning, `extractAssetManifest(rawHtml, pageUrl)` runs in the brows
 - **Favicon**: from `<link rel="icon">` / `<link rel="shortcut icon">` / `<link rel="apple-touch-icon">`
 - **og:image**: from `<meta property="og:image">`
 - **All `<img>` elements**: src, alt, width, height — with tracking pixels, spacer GIFs, and images under 32px in both dimensions filtered out
-- **CSS background images**: every `url()` from inline `style=` attributes and `<style>` blocks
+- **CSS background images**: every `url()` from inline `style=` attributes, `<style>` blocks, AND fetched external stylesheets — the manifest is enriched after the CSS fetch phase via `enrichManifestWithCss()`
 - **Inline SVGs**: count, plus any fill colors (excluding `none` and `currentColor`)
 
 All relative URLs are resolved to absolute against the page origin. The manifest is formatted by `formatAssetManifestForPrompt()` and injected into the blueprint LLM call as context.
@@ -1535,7 +1535,7 @@ If the BUILD.md Claude call fails, `design.md` and `blueprint.json` are still de
 
 | File | Purpose |
 |------|---------|
-| `src/lib/assetExtractor.ts` | New — extracts asset manifest (logo, favicon, og:image, images, background images, SVGs) from raw HTML before cleaning; resolves all URLs to absolute |
+| `src/lib/assetExtractor.ts` | New — extracts asset manifest (logo, favicon, og:image, images, background images, SVGs) from raw HTML before cleaning; resolves all URLs to absolute; `enrichManifestWithCss()` adds background images from fetched external CSS |
 | `src/lib/prompts/buildSpecPrompt.ts` | New — `BUILD_SPEC_SYSTEM_PROMPT` and `buildBuildUserPrompt()` for the BUILD.md generation call |
 | `src/lib/prompts/designExtractionPrompts.ts` | Modified — added verbatim text instruction, `text_blocks` and `assets` arrays to blueprint schema, `global_assets` object, `assetManifest` parameter to `buildBlueprintUserPrompt()` |
 | `src/components/DesignExtractor.tsx` | Modified — imports, `BuildTarget` type, `buildTarget` state, asset extraction call, Phase 5 LLM call, build target selector UI, BUILD.md output panel, copy-all button, 5-phase progress bar |

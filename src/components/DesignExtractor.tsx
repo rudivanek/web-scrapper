@@ -11,7 +11,7 @@ import {
   buildBlueprintUserPrompt,
 } from '../lib/prompts/designExtractionPrompts';
 import { BUILD_SPEC_SYSTEM_PROMPT, buildBuildUserPrompt } from '../lib/prompts/buildSpecPrompt';
-import { extractAssetManifest, formatAssetManifestForPrompt } from '../lib/assetExtractor';
+import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -267,7 +267,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Phase 2b: Extract asset manifest from raw HTML (before cleaning)
       const assetManifest = extractAssetManifest(rawHtml, normalized);
-      const assetManifestText = formatAssetManifestForPrompt(assetManifest);
 
       // Phase 3: Fetch external stylesheets (pass Firecrawl's rawHtml to avoid a separate fetch)
       setPhase('fetch-css', 'Descargando hojas de estilo externas...', 25);
@@ -289,6 +288,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       const frequency = cssData?.frequency ?? null;
       const tailwind = cssData?.tailwind ?? null;
       const combinedCss = buildCombinedCss(cssData, cssBlocks, inlineStyles);
+
+      // Enrich asset manifest with background images from fetched external CSS
+      let enrichedManifest = assetManifest;
+      if (cssData?.rawCss) {
+        enrichedManifest = enrichManifestWithCss(assetManifest, cssData.rawCss, normalized);
+      }
+      const assetManifestText = formatAssetManifestForPrompt(enrichedManifest);
 
       // Prepare screenshot segments for Claude vision
       let screenshotSegments: string[] = [];

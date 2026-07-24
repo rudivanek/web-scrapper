@@ -173,6 +173,42 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
   };
 }
 
+export function enrichManifestWithCss(
+  manifest: AssetManifest,
+  rawCss: Record<string, string>,
+  pageUrl: string,
+): AssetManifest {
+  let origin = '';
+  try {
+    origin = new URL(pageUrl).origin;
+  } catch { /* ignore */ }
+
+  const bgUrlRe = /url\(["']?([^"')]+)["']?\)/g;
+  const existing = new Set(manifest.background_images);
+  const newBgs: string[] = [];
+
+  for (const sheetText of Object.values(rawCss)) {
+    bgUrlRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = bgUrlRe.exec(sheetText)) !== null) {
+      const raw = m[1];
+      if (!raw || raw.startsWith('data:')) continue;
+      const abs = raw.startsWith('http') ? raw : raw.startsWith('//') ? `https:${raw}` : raw.startsWith('/') ? `${origin}${raw}` : `${origin}/${raw}`;
+      if (!existing.has(abs) && !newBgs.includes(abs)) {
+        newBgs.push(abs);
+      }
+    }
+  }
+
+  if (newBgs.length > 0) {
+    return {
+      ...manifest,
+      background_images: [...manifest.background_images, ...newBgs],
+    };
+  }
+  return manifest;
+}
+
 export function formatAssetManifestForPrompt(manifest: AssetManifest): string {
   const lines: string[] = ['/* ─── Asset manifest (extracted from raw HTML, all URLs resolved to absolute) ─── */'];
 
