@@ -20,13 +20,18 @@ export async function screenshotToBase64(screenshot: string): Promise<string | n
   }
 }
 
-export async function callClaude(
+export interface ClaudeResult {
+  text: string;
+  stopReason: string | null;
+}
+
+export async function callClaudeWithMeta(
   apiKey: string,
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
   images?: string[]
-): Promise<string> {
+): Promise<ClaudeResult> {
   const safeImages = (images ?? []).filter(Boolean).slice(0, 4);
 
   const userContent: unknown = safeImages.length > 0
@@ -77,6 +82,7 @@ export async function callClaude(
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let fullText = '';
+  let stopReason: string | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -91,9 +97,23 @@ export async function callClaude(
         if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
           fullText += parsed.delta.text;
         }
+        if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
+          stopReason = parsed.delta.stop_reason;
+        }
       } catch (_) {}
     }
   }
 
-  return fullText;
+  return { text: fullText, stopReason };
+}
+
+export async function callClaude(
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  images?: string[]
+): Promise<string> {
+  const result = await callClaudeWithMeta(apiKey, systemPrompt, userPrompt, maxTokens, images);
+  return result.text;
 }

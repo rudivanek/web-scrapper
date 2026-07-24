@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
-import { callClaude } from '../lib/callClaude';
+import { callClaude, callClaudeWithMeta } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
@@ -10,7 +10,7 @@ import {
   buildDesignUserPrompt,
   buildBlueprintUserPrompt,
 } from '../lib/prompts/designExtractionPrompts';
-import { BUILD_SPEC_SYSTEM_PROMPT, buildBuildUserPrompt } from '../lib/prompts/buildSpecPrompt';
+import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { ApiKeyModal } from './ApiKeyModal';
 
@@ -28,6 +28,7 @@ interface ExtractionResult {
   designMd: string;
   blueprintJson: string;
   buildMd: string | null;
+  buildMdIncomplete: boolean;
   screenshot: string | null;
   screenshotAvailable: boolean;
   externalSheets: number;
@@ -323,20 +324,96 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
+      // Generated in three sequential calls to avoid truncation:
+      //   Call 1: Foundation (sections 1–4), max_tokens 8000
+      //   Call 2: Sections (section 5), max_tokens 16000 — batched if >8 sections
+      //   Call 3: Components + Assumptions (sections 6–7), max_tokens 8000
       let buildMd: string | null = null;
+      let buildMdIncomplete = false;
       if (buildTarget === 'react-tailwind') {
         setPhase('llm-buildspec', 'Generando especificación de reconstrucción (BUILD.md)...', 90);
         try {
-          const buildUserPrompt = buildBuildUserPrompt(designMd, blueprintJson);
-          const buildRaw = await callClaude(apiKey, BUILD_SPEC_SYSTEM_PROMPT, buildUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
-          buildMd = buildRaw.trim();
+          const imgs = screenshotSegments.length > 0 ? screenshotSegments : undefined;
+
+          // Call 1: Foundation (sections 1–4)
+          const foundationPrompt = buildFoundationUserPrompt(designMd);
+          const foundationRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 8000, imgs);
+          let foundationText = foundationRes.text.trim();
+          if (foundationRes.stopReason === 'max_tokens') {
+            console.warn('[BUILD.md] Foundation call truncated (stop_reason=max_tokens)');
+            buildMdIncomplete = true;
+          }
+
+          // Call 2: Sections (section 5) — batch if >8 sections
+          let sectionsText = '';
+          let sectionBatchRanges: { start: number; end: number; total: number }[] = [];
+          let totalSections = 0;
+          try {
+            const bpParsed = JSON.parse(blueprintJson);
+            totalSections = Array.isArray(bpParsed.sections) ? bpParsed.sections.length : 0;
+          } catch { /* keep 0 */ }
+
+          if (totalSections > 8) {
+            const batchSize = 6;
+            for (let s = 0; s < totalSections; s += batchSize) {
+              const startIdx = s;
+              const endIdx = Math.min(s + batchSize - 1, totalSections - 1);
+              sectionBatchRanges.push({ start: startIdx, end: endIdx, total: totalSections });
+            }
+            for (const range of sectionBatchRanges) {
+              const batchPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText, range);
+              const batchRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs);
+              sectionsText += (sectionsText ? '\n\n' : '') + batchRes.text.trim();
+              if (batchRes.stopReason === 'max_tokens') {
+                console.warn(`[BUILD.md] Sections batch ${range.start}–${range.end} truncated (stop_reason=max_tokens)`);
+                buildMdIncomplete = true;
+              }
+            }
+          } else {
+            const sectionsPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText);
+            const sectionsRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs);
+            sectionsText = sectionsRes.text.trim();
+            if (sectionsRes.stopReason === 'max_tokens') {
+              console.warn('[BUILD.md] Sections call truncated (stop_reason=max_tokens)');
+              buildMdIncomplete = true;
+            }
+          }
+
+          // B2: Verify every section index appears in the generated output
+          if (totalSections > 0) {
+            const missingIndices: number[] = [];
+            for (let i = 0; i < totalSections; i++) {
+              // Check for common patterns: "Section 0", "section 0", "Sección 0", or just the index in context
+              if (!sectionsText.includes(`Section ${i}`) && !sectionsText.includes(`section ${i}`) && !sectionsText.includes(`Sección ${i}`) && !sectionsText.includes(`"index": ${i}`)) {
+                missingIndices.push(i);
+              }
+            }
+            if (missingIndices.length > 0) {
+              console.warn(`[BUILD.md] Missing section indices: ${missingIndices.join(', ')}`);
+              sectionsText += `\n\n> INCOMPLETO: las secciones ${missingIndices.join(', ')} no se generaron. Vuelve a ejecutar.`;
+              buildMdIncomplete = true;
+            }
+          }
+
+          // Call 3: Components + Assumptions (sections 6–7)
+          const sections1to5 = foundationText + '\n\n' + sectionsText;
+          const componentsPrompt = buildComponentsUserPrompt(designMd, sections1to5);
+          const componentsRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 8000, imgs);
+          let componentsText = componentsRes.text.trim();
+          if (componentsRes.stopReason === 'max_tokens') {
+            console.warn('[BUILD.md] Components call truncated (stop_reason=max_tokens)');
+            buildMdIncomplete = true;
+          }
+
+          // A2: Concatenate with fixed header prepended once
+          buildMd = `${BUILD_SPEC_FIXED_HEADER}\n\n${foundationText}\n\n${sectionsText}\n\n${componentsText}`;
         } catch (e) {
           console.warn('BUILD.md generation failed — delivering design.md and blueprint.json only:', e);
         }
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform, buildTarget });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, platform, buildTarget });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -584,6 +661,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             filename={`${site}-blueprint.json`}
             downloadMime="application/json"
           />
+
+          {/* BUILD.md incomplete warning */}
+          {result.buildTarget === 'react-tailwind' && result.buildMd && result.buildMdIncomplete && (
+            <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron.</span>
+            </div>
+          )}
 
           {/* BUILD.md output (only for React/Tailwind) */}
           {result.buildTarget === 'react-tailwind' && result.buildMd && (

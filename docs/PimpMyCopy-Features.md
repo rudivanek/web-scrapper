@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.23 | Last Updated: 2026-07-24T18:00:00Z -->
+<!-- Version: 1.24 | Last Updated: 2026-07-24T20:30:00Z -->
 
 ---
 
@@ -1218,7 +1218,7 @@ The extraction UI shows:
 | `src/components/DesignExtractor.tsx` | Main extraction component |
 | `src/lib/imagePrep.ts` | Screenshot preparation — scales to 1400px width, slices tall screenshots into ≤1600px segments with 100px overlap, max 4 segments, hard validation |
 | `src/lib/prompts/designExtractionPrompts.ts` | System prompts and user message builders for both LLM calls |
-| `src/lib/callClaude.ts` | Claude API wrapper — accepts `images?: string[]` param; retries without images on 400 image errors |
+| `src/lib/callClaude.ts` | Claude API wrapper — accepts `images?: string[]` param; retries without images on 400 image errors. Added `callClaudeWithMeta()` returning `{ text, stopReason }` by capturing `message_delta` SSE events; `callClaude()` wraps it for backward compatibility |
 | `src/lib/firecrawl.ts` | `extractCssData()` — calls the `extract-css` edge function to fetch external stylesheets |
 
 ### Design Decisions
@@ -1482,21 +1482,34 @@ The blueprint prompt now instructs Claude to reproduce all visible text VERBATIM
 
 A new top-level `global_assets` object (`logo`, `favicon`, `og_image`) is also added to the blueprint JSON.
 
-#### Phase 5 — LLM Call C: Generate BUILD.md
+#### Phase 5 — LLM Call C: Generate BUILD.md (Three-Call Pipeline)
 
-After the blueprint call completes, a third Claude call (`claude-sonnet-4-6`, max_tokens 8000) generates BUILD.md using:
-- The completed `design.md`
-- The completed `blueprint.json` (with `text_blocks` and `assets`)
-- The screenshot segments
+After the blueprint call completes, BUILD.md is generated in **three sequential Claude calls** (`claude-sonnet-4-6`) to avoid truncation on large pages. The outputs are concatenated in order, with the fixed header prepended once at the top.
 
-The `BUILD_SPEC_SYSTEM_PROMPT` (`src/lib/prompts/buildSpecPrompt.ts`) instructs Claude to:
+**Call 1 — Foundation** (`BUILD_SPEC_FOUNDATION_PROMPT`, max_tokens 8000):
+- Inputs: `design.md` + screenshot segments
+- Produces sections 1–4: Overview, Tech Notes (fonts), tailwind.config.js theme extension, Global CSS
 
+**Call 2 — Sections** (`BUILD_SPEC_SECTIONS_PROMPT`, max_tokens 16000):
+- Inputs: `design.md` + `blueprint.json` (with `text_blocks` and `assets`) + screenshot segments + the generated sections 1–4 (for consistent token names)
+- Produces section 5: Section-by-Section Build Instructions
+- If blueprint.json has more than 8 sections, this call is **batched** in groups of 6 sections each, with sections 1–4 passed as context to every batch. Outputs are concatenated.
+- After all batches, every blueprint section index is verified to appear in the output. Missing indices trigger a visible note: `> INCOMPLETO: las secciones N, M no se generaron. Vuelve a ejecutar.`
+
+**Call 3 — Components + Assumptions** (`BUILD_SPEC_COMPONENTS_PROMPT`, max_tokens 8000):
+- Inputs: `design.md` + the generated sections 1–5 (so it can collect every ASSUMED marker already emitted)
+- Produces sections 6–7: Component Specs (buttons, cards, nav, footer, forms, links, all interactive states) and the consolidated "Assumptions to Verify" table
+
+All three prompts share the same core framing:
 - Replace every `NOT FOUND` value in design.md with a sensible default, marked with an `/* ASSUMED — reason */` inline comment
 - Derive assumptions in priority order: (1) visual evidence from screenshot, (2) consistency with extracted values, (3) common platform conventions — never from brand name or aesthetic taste
 - Carry `CONFIRMED ABSENT` values through as real findings, not assumptions
+- The string `NOT FOUND` must never appear in BUILD.md, including inside comments — write `no declarado en el CSS de marca` if an omission needs explaining
+- The "Assumptions to Verify" section is MANDATORY — if missing, the document is unusable
 - Reproduce all text VERBATIM from blueprint `text_blocks`
 - Use exact image URLs from blueprint `assets` — no placeholder substitutions
 - Respect every `layout_contract` `must_preserve` and `do_not_do` rule
+- Each prompt is told which sections it is responsible for and instructed NOT to emit the others or repeat the header
 
 BUILD.md structure:
 1. **Overview** — page purpose, section count, detected stack
@@ -1505,11 +1518,17 @@ BUILD.md structure:
 4. **Global CSS** — valid `:root` block, no NOT FOUND, no commented-out tokens
 5. **Section-by-Section Build Instructions** — layout contract, verbatim text_blocks, assets with absolute URLs, resolved colors
 6. **Component Specs** — every CSS property filled, all interactive states, ASSUMED markers where applicable
-7. **Assumptions to Verify** — consolidated table of every ASSUMED value with its reason
+7. **Assumptions to Verify** — consolidated table of every ASSUMED value with its reason and the section it appears in
 
-A fixed header is prepended:
+A fixed header is prepended once:
 
 > Generated from an automated extraction. Values marked ASSUMED were not found in the site's CSS and were inferred from the screenshot. Review the "Assumptions to verify" section before building.
+
+#### Truncation Guard
+
+After each Claude call, the API response `stop_reason` is checked. If it is `max_tokens` (indicating the response was truncated mid-generation), a warning is logged and that segment is marked incomplete. If any segment is incomplete, a visible amber warning appears above the BUILD.md download card: "Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron." The file is still delivered — a partial BUILD.md is more useful than none. A truncated BUILD.md is never presented as a successful, complete run.
+
+The `callClaudeWithMeta()` function in `src/lib/callClaude.ts` captures both the streamed text and the `stop_reason` from the `message_delta` SSE event. The original `callClaude()` wrapper remains for backward compatibility with other callers.
 
 #### Build Target Selector
 
@@ -1521,7 +1540,9 @@ Only the React/Tailwind target produces BUILD.md output. The `buildTarget` state
 
 #### Failure Handling
 
-If the BUILD.md Claude call fails, `design.md` and `blueprint.json` are still delivered. An amber notice appears: "BUILD.md no pudo generarse — design.md y blueprint.json están disponibles." The third file is additive and never breaks the first two.
+If the BUILD.md generation fails entirely (all three calls), `design.md` and `blueprint.json` are still delivered. An amber notice appears: "BUILD.md no pudo generarse — design.md y blueprint.json están disponibles." The third file is additive and never breaks the first two.
+
+If some calls succeed but others fail or truncate, the concatenated partial BUILD.md is delivered with the truncation warning described above.
 
 #### UI Changes
 
@@ -1536,9 +1557,9 @@ If the BUILD.md Claude call fails, `design.md` and `blueprint.json` are still de
 | File | Purpose |
 |------|---------|
 | `src/lib/assetExtractor.ts` | New — extracts asset manifest (logo, favicon, og:image, images, background images, SVGs) from raw HTML before cleaning; resolves all URLs to absolute; `enrichManifestWithCss()` adds background images from fetched external CSS |
-| `src/lib/prompts/buildSpecPrompt.ts` | New — `BUILD_SPEC_SYSTEM_PROMPT` and `buildBuildUserPrompt()` for the BUILD.md generation call |
+| `src/lib/prompts/buildSpecPrompt.ts` | Modified — replaced single `BUILD_SPEC_SYSTEM_PROMPT` with three split prompts: `BUILD_SPEC_FOUNDATION_PROMPT` (sections 1–4), `BUILD_SPEC_SECTIONS_PROMPT` (section 5), `BUILD_SPEC_COMPONENTS_PROMPT` (sections 6–7), plus matching user-prompt builders. Shared core framing, NOT FOUND ban, mandatory Assumptions section |
 | `src/lib/prompts/designExtractionPrompts.ts` | Modified — added verbatim text instruction, `text_blocks` and `assets` arrays to blueprint schema, `global_assets` object, `assetManifest` parameter to `buildBlueprintUserPrompt()` |
-| `src/components/DesignExtractor.tsx` | Modified — imports, `BuildTarget` type, `buildTarget` state, asset extraction call, Phase 5 LLM call, build target selector UI, BUILD.md output panel, copy-all button, 5-phase progress bar |
+| `src/components/DesignExtractor.tsx` | Modified — imports, `BuildTarget` type, `buildTarget` state, asset extraction call, Phase 5 three-call pipeline with batching + truncation guard, `buildMdIncomplete` flag, incomplete warning UI, build target selector UI, BUILD.md output panel, copy-all button, 5-phase progress bar |
 
 #### What Did NOT Change
 
