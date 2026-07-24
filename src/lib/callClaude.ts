@@ -117,3 +117,41 @@ export async function callClaude(
   const result = await callClaudeWithMeta(apiKey, systemPrompt, userPrompt, maxTokens, images);
   return result.text;
 }
+
+export interface ContinuationResult {
+  text: string;
+  stopReason: string | null;
+  continuations: number;
+  truncated: boolean;
+}
+
+export async function callWithContinuation(
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  images: string[] | undefined,
+  segmentLabel: string,
+): Promise<ContinuationResult> {
+  const safeImages = images ?? [];
+  let text = '';
+  let stopReason: string | null = null;
+  let continuations = 0;
+  const maxContinuations = 2;
+
+  const baseResult = await callClaudeWithMeta(apiKey, systemPrompt, userPrompt, maxTokens, images);
+  text = baseResult.text;
+  stopReason = baseResult.stopReason;
+
+  while (stopReason === 'max_tokens' && continuations < maxContinuations) {
+    continuations++;
+    console.warn(`[BUILD.md] ${segmentLabel} continuation ${continuations} (stop_reason=${stopReason})`);
+    const continuationUserPrompt = 'Continue exactly where you left off. Do not repeat any content already written. Do not add a preamble. Resume mid-sentence if necessary.';
+    const contResult = await callClaudeWithMeta(apiKey, systemPrompt, continuationUserPrompt, maxTokens, safeImages.length > 0 ? safeImages : undefined);
+    text += contResult.text;
+    stopReason = contResult.stopReason;
+  }
+
+  const truncated = stopReason === 'max_tokens';
+  return { text, stopReason, continuations, truncated };
+}

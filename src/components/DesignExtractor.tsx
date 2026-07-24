@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
-import { callClaude, callClaudeWithMeta } from '../lib/callClaude';
+import { callClaude, callClaudeWithMeta, callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
@@ -325,9 +325,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
       // Generated in three sequential calls to avoid truncation:
-      //   Call 1: Foundation (sections 1–4), max_tokens 8000
+      //   Call 1: Foundation (sections 1–4), max_tokens 16000
       //   Call 2: Sections (section 5), max_tokens 16000 — batched if >8 sections
-      //   Call 3: Components + Assumptions (sections 6–7), max_tokens 8000
+      //   Call 3: Components + Assumptions (sections 6–7), max_tokens 16000
       let buildMd: string | null = null;
       let buildMdIncomplete = false;
       if (buildTarget === 'react-tailwind') {
@@ -337,10 +337,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
           // Call 1: Foundation (sections 1–4)
           const foundationPrompt = buildFoundationUserPrompt(designMd);
-          const foundationRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 8000, imgs);
+          const foundationRes = await callWithContinuation(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 16000, imgs, 'Foundation');
           let foundationText = foundationRes.text.trim();
-          if (foundationRes.stopReason === 'max_tokens') {
-            console.warn('[BUILD.md] Foundation call truncated (stop_reason=max_tokens)');
+          if (foundationRes.truncated) {
+            console.warn('[BUILD.md] Foundation call truncated after continuations (stop_reason=max_tokens)');
             buildMdIncomplete = true;
           }
 
@@ -362,19 +362,19 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             }
             for (const range of sectionBatchRanges) {
               const batchPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText, range);
-              const batchRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs);
+              const batchRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs, `Sections batch ${range.start}–${range.end}`);
               sectionsText += (sectionsText ? '\n\n' : '') + batchRes.text.trim();
-              if (batchRes.stopReason === 'max_tokens') {
-                console.warn(`[BUILD.md] Sections batch ${range.start}–${range.end} truncated (stop_reason=max_tokens)`);
+              if (batchRes.truncated) {
+                console.warn(`[BUILD.md] Sections batch ${range.start}–${range.end} truncated after continuations (stop_reason=max_tokens)`);
                 buildMdIncomplete = true;
               }
             }
           } else {
             const sectionsPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText);
-            const sectionsRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs);
+            const sectionsRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs, 'Sections');
             sectionsText = sectionsRes.text.trim();
-            if (sectionsRes.stopReason === 'max_tokens') {
-              console.warn('[BUILD.md] Sections call truncated (stop_reason=max_tokens)');
+            if (sectionsRes.truncated) {
+              console.warn('[BUILD.md] Sections call truncated after continuations (stop_reason=max_tokens)');
               buildMdIncomplete = true;
             }
           }
@@ -398,10 +398,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           // Call 3: Components + Assumptions (sections 6–7)
           const sections1to5 = foundationText + '\n\n' + sectionsText;
           const componentsPrompt = buildComponentsUserPrompt(designMd, sections1to5);
-          const componentsRes = await callClaudeWithMeta(apiKey, BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 8000, imgs);
+          const componentsRes = await callWithContinuation(apiKey, BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 16000, imgs, 'Components');
           let componentsText = componentsRes.text.trim();
-          if (componentsRes.stopReason === 'max_tokens') {
-            console.warn('[BUILD.md] Components call truncated (stop_reason=max_tokens)');
+          if (componentsRes.truncated) {
+            console.warn('[BUILD.md] Components call truncated after continuations (stop_reason=max_tokens)');
             buildMdIncomplete = true;
           }
 

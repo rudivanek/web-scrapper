@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 1.24 | Last Updated: 2026-07-24T20:30:00Z -->
+<!-- Version: 1.25 | Last Updated: 2026-07-24T21:00:00Z -->
 
 ---
 
@@ -1218,7 +1218,7 @@ The extraction UI shows:
 | `src/components/DesignExtractor.tsx` | Main extraction component |
 | `src/lib/imagePrep.ts` | Screenshot preparation — scales to 1400px width, slices tall screenshots into ≤1600px segments with 100px overlap, max 4 segments, hard validation |
 | `src/lib/prompts/designExtractionPrompts.ts` | System prompts and user message builders for both LLM calls |
-| `src/lib/callClaude.ts` | Claude API wrapper — accepts `images?: string[]` param; retries without images on 400 image errors. Added `callClaudeWithMeta()` returning `{ text, stopReason }` by capturing `message_delta` SSE events; `callClaude()` wraps it for backward compatibility |
+| `src/lib/callClaude.ts` | Claude API wrapper — accepts `images?: string[]` param; retries without images on 400 image errors. Added `callClaudeWithMeta()` returning `{ text, stopReason }` by capturing `message_delta` SSE events, and `callWithContinuation()` which auto-continues on `max_tokens` (up to 2 continuations); `callClaude()` wraps it for backward compatibility |
 | `src/lib/firecrawl.ts` | `extractCssData()` — calls the `extract-css` edge function to fetch external stylesheets |
 
 ### Design Decisions
@@ -1486,7 +1486,7 @@ A new top-level `global_assets` object (`logo`, `favicon`, `og_image`) is also a
 
 After the blueprint call completes, BUILD.md is generated in **three sequential Claude calls** (`claude-sonnet-4-6`) to avoid truncation on large pages. The outputs are concatenated in order, with the fixed header prepended once at the top.
 
-**Call 1 — Foundation** (`BUILD_SPEC_FOUNDATION_PROMPT`, max_tokens 8000):
+**Call 1 — Foundation** (`BUILD_SPEC_FOUNDATION_PROMPT`, max_tokens 16000):
 - Inputs: `design.md` + screenshot segments
 - Produces sections 1–4: Overview, Tech Notes (fonts), tailwind.config.js theme extension, Global CSS
 
@@ -1496,7 +1496,7 @@ After the blueprint call completes, BUILD.md is generated in **three sequential 
 - If blueprint.json has more than 8 sections, this call is **batched** in groups of 6 sections each, with sections 1–4 passed as context to every batch. Outputs are concatenated.
 - After all batches, every blueprint section index is verified to appear in the output. Missing indices trigger a visible note: `> INCOMPLETO: las secciones N, M no se generaron. Vuelve a ejecutar.`
 
-**Call 3 — Components + Assumptions** (`BUILD_SPEC_COMPONENTS_PROMPT`, max_tokens 8000):
+**Call 3 — Components + Assumptions** (`BUILD_SPEC_COMPONENTS_PROMPT`, max_tokens 16000):
 - Inputs: `design.md` + the generated sections 1–5 (so it can collect every ASSUMED marker already emitted)
 - Produces sections 6–7: Component Specs (buttons, cards, nav, footer, forms, links, all interactive states) and the consolidated "Assumptions to Verify" table
 
@@ -1524,11 +1524,13 @@ A fixed header is prepended once:
 
 > Generated from an automated extraction. Values marked ASSUMED were not found in the site's CSS and were inferred from the screenshot. Review the "Assumptions to verify" section before building.
 
-#### Truncation Guard
+#### Truncation Guard and Auto-Continuation
 
-After each Claude call, the API response `stop_reason` is checked. If it is `max_tokens` (indicating the response was truncated mid-generation), a warning is logged and that segment is marked incomplete. If any segment is incomplete, a visible amber warning appears above the BUILD.md download card: "Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron." The file is still delivered — a partial BUILD.md is more useful than none. A truncated BUILD.md is never presented as a successful, complete run.
+After each Claude call, the API response `stop_reason` is checked. If it is `max_tokens` (indicating the response was truncated mid-generation), the `callWithContinuation()` helper in `src/lib/callClaude.ts` automatically makes a follow-up call with the message "Continue exactly where you left off. Do not repeat any content already written. Do not add a preamble. Resume mid-sentence if necessary." The continuation text is concatenated directly onto the partial response. Up to 2 continuations are allowed per call. Each continuation is logged: `[BUILD.md] {segment} continuation {n} (stop_reason={reason})`.
 
-The `callClaudeWithMeta()` function in `src/lib/callClaude.ts` captures both the streamed text and the `stop_reason` from the `message_delta` SSE event. The original `callClaude()` wrapper remains for backward compatibility with other callers.
+If `stop_reason` is still `max_tokens` after 2 continuations, the segment is marked incomplete and a visible amber warning appears above the BUILD.md download card: "Advertencia: BUILD.md quedó incompleto. Algunas secciones no se generaron." The file is still delivered — a partial BUILD.md is more useful than none. A truncated BUILD.md is never presented as a successful, complete run.
+
+The `callClaudeWithMeta()` function captures both the streamed text and the `stop_reason` from the `message_delta` SSE event. `callWithContinuation()` wraps it with the auto-continuation logic. The original `callClaude()` wrapper remains for backward compatibility with other callers.
 
 #### Build Target Selector
 
