@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.4 | Last Updated: 2026-07-25T01:00:00Z -->
+<!-- Version: 8.5 | Last Updated: 2026-07-28T00:00:00Z -->
 
 ---
 
@@ -1674,6 +1674,55 @@ When URL A's CSS comes back degraded (`cssLooksInsufficient` or the dynamic-CSS 
 - extract-css, platform detection, frequency analysis, Rule 0 — unchanged.
 - The asset manifest logic — only its source URL is pinned to B; the extraction algorithm itself is unchanged.
 - BUILD.md call split, truncation guard, ratio warning — unchanged.
+
+---
+
+### Single-File Output Mode — LLM-Ready Spec (2026-07-28)
+
+**Added:** 2026-07-28 — The Design Extractor now supports a second output format that produces one self-contained `.md` file and nothing else, designed for feeding to another LLM. The existing three-file output (design.md + blueprint.json + BUILD.md) remains the default and is unchanged.
+
+#### Mode Toggle
+
+A new "Formato de salida" selector appears above the build target selector, with two radio options:
+
+- **Completo (design.md + blueprint.json + BUILD.md) — por defecto** (`outputMode = 'full'`) — existing behaviour, unchanged
+- **Un solo archivo (para otro LLM)** (`outputMode = 'single'`) — produces only the consolidated BUILD.md, renamed and header-augmented
+
+The toggle is disabled while an extraction is running. Default is `'full'`.
+
+#### Single-File Mode Behaviour
+
+When `outputMode === 'single'`:
+
+1. The pipeline runs exactly as today through BUILD.md generation. design.md and blueprint.json are still generated internally because BUILD.md requires them as inputs — those calls are not skipped.
+2. After BUILD.md is assembled, only BUILD.md is presented to the user. The design.md and blueprint.json output panels are hidden. The "Copiar todo para el builder" and "Download All Files" buttons are also hidden.
+3. The delivered file is renamed from `{site}-BUILD.md` to `{site}-design-spec.md`, since it is the sole artifact in this mode.
+4. The BUILD.md output panel title changes to "Design Spec (para LLM)".
+5. The screenshot pipeline that feeds Claude still runs — it improves BUILD.md quality. Only the on-screen extra outputs are suppressed, not the internal generation.
+6. All existing BUILD.md safeguards still apply: the assumption-ratio banner, the truncation/continuation guard, the duplicate-strip. A single-file output that is truncated still warns.
+
+#### LLM Consumption Header
+
+In single-file mode, a short usage header is prepended to the top of the file, above the existing BUILD.md header:
+
+```
+# Design & Build Specification — {site}
+This is a complete, self-contained design specification extracted from
+{url}. It contains the full design system (colors, typography, spacing,
+components) and section-by-section structure needed to rebuild this page.
+Values marked ASSUMED were inferred visually, not extracted from CSS —
+review them before relying on them. Feed this entire file to an LLM to
+recreate the page.
+```
+
+Where `{site}` is the hostname of the structure URL and `{url}` is the design URL. If two-URL mode is active, the existing provenance line appears beneath this header.
+
+#### What Did NOT Change
+
+- `'full'` mode — identical to today in every respect.
+- BUILD.md generation logic, its three-call split, and all its safeguards.
+- design.md and blueprint.json generation (still run internally in single mode as BUILD.md inputs).
+- The two-URL feature, platform detection, Rule 0.
 
 ---
 

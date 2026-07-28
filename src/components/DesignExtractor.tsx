@@ -44,6 +44,7 @@ interface ExtractionResult {
   provenance: string | null;
   platformMismatch: boolean;
   platformMismatchNote: string | null;
+  outputMode: 'full' | 'single';
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -260,6 +261,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [structureUrl, setStructureUrl] = useState('');
   const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
+  const [outputMode, setOutputMode] = useState<'full' | 'single'>('full');
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -633,8 +635,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         }
       }
 
+      // Single-file mode: prepend LLM usage header above the BUILD.md fixed header
+      if (outputMode === 'single' && buildMd) {
+        const llmHeader = `# Design & Build Specification — ${hostname(structUrl)}\nThis is a complete, self-contained design specification extracted from ${designUrl}. It contains the full design system (colors, typography, spacing, components) and section-by-section structure needed to rebuild this page.\nValues marked ASSUMED were inferred visually, not extracted from CSS — review them before relying on them. Feed this entire file to an LLM to recreate the page.`;
+        buildMd = `${llmHeader}\n\n${buildMd}`;
+      }
+
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -774,6 +782,37 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Output mode selector */}
+      <div className="mb-6">
+        <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Formato de salida</span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'full' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+            <input
+              type="radio"
+              name="outputMode"
+              value="full"
+              checked={outputMode === 'full'}
+              onChange={() => setOutputMode('full')}
+              disabled={isRunning}
+              className="w-4 h-4"
+            />
+            <span className="text-sm text-gray-700">Completo (design.md + blueprint.json + BUILD.md) — por defecto</span>
+          </label>
+          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'single' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+            <input
+              type="radio"
+              name="outputMode"
+              value="single"
+              checked={outputMode === 'single'}
+              onChange={() => setOutputMode('single')}
+              disabled={isRunning}
+              className="w-4 h-4"
+            />
+            <span className="text-sm text-gray-700">Un solo archivo (para otro LLM)</span>
+          </label>
+        </div>
       </div>
 
       {/* Build target selector */}
@@ -971,23 +1010,27 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
-          {/* design.md output */}
-          <OutputPanel
-            title="design.md"
-            icon={<Palette className="w-4 h-4" />}
-            content={result.designMd}
-            filename={`${site}-design.md`}
-            downloadMime="text/markdown"
-          />
+          {/* design.md output — hidden in single-file mode */}
+          {result.outputMode === 'full' && (
+            <OutputPanel
+              title="design.md"
+              icon={<Palette className="w-4 h-4" />}
+              content={result.designMd}
+              filename={`${site}-design.md`}
+              downloadMime="text/markdown"
+            />
+          )}
 
-          {/* Blueprint JSON output */}
-          <OutputPanel
-            title="Page Blueprint JSON"
-            icon={<Layers className="w-4 h-4" />}
-            content={result.blueprintJson}
-            filename={`${site}-blueprint.json`}
-            downloadMime="application/json"
-          />
+          {/* Blueprint JSON output — hidden in single-file mode */}
+          {result.outputMode === 'full' && (
+            <OutputPanel
+              title="Page Blueprint JSON"
+              icon={<Layers className="w-4 h-4" />}
+              content={result.blueprintJson}
+              filename={`${site}-blueprint.json`}
+              downloadMime="application/json"
+            />
+          )}
 
           {/* BUILD.md incomplete warning */}
           {result.buildTarget === 'react-tailwind' && result.buildMd && result.buildMdIncomplete && (
@@ -1013,10 +1056,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           {/* BUILD.md output (only for React/Tailwind) */}
           {result.buildTarget === 'react-tailwind' && result.buildMd && (
             <OutputPanel
-              title="BUILD.md — Reconstruction Spec"
+              title={result.outputMode === 'single' ? 'Design Spec (para LLM)' : 'BUILD.md — Reconstruction Spec'}
               icon={<FileDown className="w-4 h-4" />}
               content={result.buildMd}
-              filename={`${site}-BUILD.md`}
+              filename={result.outputMode === 'single' ? `${site}-design-spec.md` : `${site}-BUILD.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1029,12 +1072,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
-          {/* Quick-download all + copy for builder */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            {result.buildMd && (
-              <button
-                onClick={() => {
-                  const payload = `Rebuild this website exactly as specified. BUILD.md defines the design system and section-by-section structure. blueprint.json defines layout contracts — respect every must_preserve and do_not_do rule. Use the exact text and image URLs provided. Do not redesign or improve anything.
+          {/* Quick-download all + copy for builder — hidden in single-file mode */}
+          {result.outputMode === 'full' && (
+            <div className="flex items-center justify-end gap-3 pt-2">
+              {result.buildMd && (
+                <button
+                  onClick={() => {
+                    const payload = `Rebuild this website exactly as specified. BUILD.md defines the design system and section-by-section structure. blueprint.json defines layout contracts — respect every must_preserve and do_not_do rule. Use the exact text and image URLs provided. Do not redesign or improve anything.
 
 --- BUILD.md ---
 
@@ -1045,28 +1089,29 @@ ${result.buildMd}
 \`\`\`json
 ${result.blueprintJson}
 \`\`\``;
-                  navigator.clipboard.writeText(payload);
+                    navigator.clipboard.writeText(payload);
+                  }}
+                  className="flex items-center space-x-2 px-5 py-2.5 bg-gray-700 text-white text-sm font-semibold hover:bg-gray-600 transition-colors rounded"
+                >
+                  <Clipboard className="w-4 h-4" />
+                  <span>Copiar todo para el builder</span>
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  downloadFile(result.designMd, `${site}-design.md`, 'text/markdown');
+                  setTimeout(() => downloadFile(result.blueprintJson, `${site}-blueprint.json`, 'application/json'), 300);
+                  if (result.buildMd) {
+                    setTimeout(() => downloadFile(result.buildMd!, `${site}-BUILD.md`, 'text/markdown'), 600);
+                  }
                 }}
-                className="flex items-center space-x-2 px-5 py-2.5 bg-gray-700 text-white text-sm font-semibold hover:bg-gray-600 transition-colors rounded"
+                className="flex items-center space-x-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 transition-colors rounded"
               >
-                <Clipboard className="w-4 h-4" />
-                <span>Copiar todo para el builder</span>
+                <FileDown className="w-4 h-4" />
+                <span>Download All Files</span>
               </button>
-            )}
-            <button
-              onClick={() => {
-                downloadFile(result.designMd, `${site}-design.md`, 'text/markdown');
-                setTimeout(() => downloadFile(result.blueprintJson, `${site}-blueprint.json`, 'application/json'), 300);
-                if (result.buildMd) {
-                  setTimeout(() => downloadFile(result.buildMd!, `${site}-BUILD.md`, 'text/markdown'), 600);
-                }
-              }}
-              className="flex items-center space-x-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 transition-colors rounded"
-            >
-              <FileDown className="w-4 h-4" />
-              <span>Download All Files</span>
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       )}
     </div>
