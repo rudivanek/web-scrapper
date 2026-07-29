@@ -705,4 +705,3 @@ export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string
 
 
 
-export { buildCopyMarkdown, buildCopyMarkdownLorem }
