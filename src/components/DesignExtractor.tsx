@@ -12,6 +12,7 @@ import {
 } from '../lib/prompts/designExtractionPrompts';
 import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
+import { buildVibePrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -248,6 +249,85 @@ function OutputPanel({
   );
 }
 
+// ─── Vibe Prompt Panel ────────────────────────────────────────────────────────
+
+function VibePromptPanel({
+  buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
+}: {
+  buildMd: string;
+  blueprintJson: string;
+  provenance: string | null;
+  buildTarget: BuildTarget;
+  vibeTarget: VibeTarget;
+  onTargetChange: (t: VibeTarget) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const prompt = buildVibePrompt(
+    vibeTarget,
+    { buildMd, blueprintJson, provenance },
+    buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html',
+  );
+
+  return (
+    <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
+      <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+        <div className="flex items-center space-x-3">
+          <span className="text-gray-600"><Clipboard className="w-4 h-4" /></span>
+          <span className="font-semibold text-gray-800 text-sm">Prompt para builder</span>
+          <span className="text-xs text-gray-400">{(prompt.length / 1024).toFixed(1)} KB</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { navigator.clipboard.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium bg-gray-900 text-white hover:bg-gray-800 rounded transition-colors"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? 'Copiado' : 'Copiar prompt'}</span>
+          </button>
+          <button
+            onClick={() => setExpanded(o => !o)}
+            className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+      <div className="px-5 py-4 space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Plataforma destino</label>
+          <div className="flex flex-wrap gap-2">
+            {VIBE_TARGETS.map(t => (
+              <button
+                key={t.id}
+                onClick={() => onTargetChange(t.id)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                  vibeTarget === t.id
+                    ? 'border-gray-900 bg-gray-900 text-white'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {expanded && (
+          <pre className="text-xs font-mono bg-gray-900 text-green-400 overflow-auto max-h-[500px] leading-relaxed whitespace-pre-wrap break-words p-4 rounded">
+            {prompt}
+          </pre>
+        )}
+        {!expanded && (
+          <p className="text-xs text-gray-500">
+            Prompt listo para pegar en {VIBE_TARGETS.find(t => t.id === vibeTarget)?.label}. Copia y pega en tu builder.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
 export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
@@ -262,6 +342,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
   const [outputMode, setOutputMode] = useState<'full' | 'single'>('full');
+  const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -1111,6 +1192,18 @@ ${result.blueprintJson}
                 <span>Download All Files</span>
               </button>
             </div>
+          )}
+
+          {/* Prompt para builder panel — shown in both output modes */}
+          {result.buildMd && (
+            <VibePromptPanel
+              buildMd={result.buildMd}
+              blueprintJson={result.blueprintJson}
+              provenance={result.provenance}
+              buildTarget={result.buildTarget}
+              vibeTarget={vibeTarget}
+              onTargetChange={setVibeTarget}
+            />
           )}
         </div>
       )}

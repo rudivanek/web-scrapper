@@ -1,0 +1,401 @@
+export type VibeTarget = 'lovable' | 'bolt' | 'v0' | 'claude-design' | 'generic';
+
+export const VIBE_TARGETS: { id: VibeTarget; label: string }[] = [
+  { id: 'lovable', label: 'Lovable' },
+  { id: 'bolt', label: 'Bolt' },
+  { id: 'v0', label: 'v0' },
+  { id: 'claude-design', label: 'Claude Design' },
+  { id: 'generic', label: 'Any' },
+];
+
+export type BuildOutputTarget = 'react-tailwind' | 'plain-html';
+
+interface VibePromptInput {
+  buildMd: string;
+  blueprintJson: string;
+  provenance: string | null;
+}
+
+// ─── Regex helpers (extract real design tokens from BUILD.md) ─────────────────
+
+function extractRootBlock(buildMd: string): string {
+  const m = buildMd.match(/```(?:css)?\s*\n?\s*(:root|html)\s*\{([\s\S]*?)\}\s*\n?```/);
+  if (m) return `${m[1]} {${m[2]}}`;
+  const loose = buildMd.match(/(:root|html)\s*\{([\s\S]*?)\}/);
+  return loose ? `${loose[1]} {${loose[2]}}` : '';
+}
+
+function extractColors(buildMd: string): { name: string; value: string }[] {
+  const colors: { name: string; value: string }[] = [];
+  const seen = new Set<string>();
+  const rootBlock = extractRootBlock(buildMd);
+  const colorRe = /--([\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))/g;
+  let m: RegExpExecArray | null;
+  while ((m = colorRe.exec(rootBlock)) !== null) {
+    const key = `${m[1]}:${m[2]}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      colors.push({ name: `--${m[1]}`, value: m[2] });
+    }
+  }
+  return colors;
+}
+
+function extractFonts(buildMd: string): string[] {
+  const fonts: string[] = [];
+  const seen = new Set<string>();
+  const rootBlock = extractRootBlock(buildMd);
+  const fontRe = /--(?:font-[\w-]*|heading-font|body-font|font-family)\s*:\s*([^;]+);/g;
+  let m: RegExpExecArray | null;
+  while ((m = fontRe.exec(rootBlock)) !== null) {
+    const f = m[1].trim();
+    if (!seen.has(f)) {
+      seen.add(f);
+      fonts.push(f);
+    }
+  }
+  const inlineFontRe = /font-family\s*:\s*([^;]+);/g;
+  while ((m = inlineFontRe.exec(buildMd)) !== null) {
+    const f = m[1].trim();
+    if (!seen.has(f)) {
+      seen.add(f);
+      fonts.push(f);
+    }
+  }
+  return fonts;
+}
+
+function extractImageUrls(buildMd: string, blueprintJson: string): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const urlRe = /https?:\/\/[^\s"'`)\]]+\.(?:png|jpg|jpeg|gif|webp|svg|avif|ico)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = urlRe.exec(buildMd)) !== null) {
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      urls.push(m[0]);
+    }
+  }
+  while ((m = urlRe.exec(blueprintJson)) !== null) {
+    if (!seen.has(m[0])) {
+      seen.add(m[0]);
+      urls.push(m[0]);
+    }
+  }
+  return urls;
+}
+
+function extractSectionNames(blueprintJson: string): string[] {
+  try {
+    const bp = JSON.parse(blueprintJson);
+    if (bp.sections && Array.isArray(bp.sections)) {
+      return bp.sections.map((s: { section_name?: string; name?: string; section_index?: number }, i: number) =>
+        s.section_name || s.name || `Section ${s.section_index ?? i + 1}`
+      );
+    }
+  } catch { /* not valid JSON */ }
+  return [];
+}
+
+function extractLayoutContracts(blueprintJson: string): string[] {
+  try {
+    const bp = JSON.parse(blueprintJson);
+    if (bp.sections && Array.isArray(bp.sections)) {
+      return bp.sections
+        .filter((s: { layout_contract?: unknown }) => s.layout_contract)
+        .map((s: { section_name?: string; name?: string; layout_contract?: { must_preserve?: string[]; do_not_do?: string[] } }) => {
+          const name = s.section_name || s.name || 'Section';
+          const parts: string[] = [];
+          if (s.layout_contract?.must_preserve?.length) {
+            parts.push(`must_preserve: ${s.layout_contract.must_preserve.join(', ')}`);
+          }
+          if (s.layout_contract?.do_not_do?.length) {
+            parts.push(`do_not_do: ${s.layout_contract.do_not_do.join(', ')}`);
+          }
+          return parts.length ? `${name} — ${parts.join(' | ')}` : '';
+        })
+        .filter(Boolean);
+    }
+  } catch { /* not valid JSON */ }
+  return [];
+}
+
+function hasAssumptions(buildMd: string): boolean {
+  return /ASSUMED/i.test(buildMd);
+}
+
+function isCrossSite(provenance: string | null): boolean {
+  if (!provenance) return false;
+  return /diferentes sitios|different sites|diseño.*estructura|design.*structure/i.test(provenance);
+}
+
+// ─── Shared mandatory rules ──────────────────────────────────────────────────
+
+const MANDATORY_RULES = `
+## MANDATORY RULES (non-negotiable)
+
+1. EXACT IMAGES: Use ONLY the image URLs listed below. They are real, public, absolute URLs extracted from the original page. NEVER use placehold.co, stock photos, AI-generated images, or any placeholder. If an image URL is broken, leave the <img> tag with the original URL — do not substitute.
+
+2. EXACT COPY: Use the EXACT text from the specification. Do not rewrite, translate, shorten, or improve any text. Do NOT write "lorem ipsum". Do NOT write "placeholder text here". Do NOT write "write copy that fits" or any instruction to generate copy — the copy already exists in the spec, use it verbatim.
+
+3. EXACT SECTIONS: Build the EXACT sections listed below, in the exact order given. Do NOT substitute a generic Hero/Features/Testimonials/CTA template. If the section list below is empty or says "no sections available", say so explicitly — do not invent a section list.
+
+4. LAYOUT CONTRACTS: Respect every layout_contract rule (must_preserve and do_not_do) from the blueprint. These are hard constraints, not suggestions.
+
+5. ASSUMED VALUES: Values marked ASSUMED in the spec are the best available estimates. Use them as given. Do not treat them as license to redesign or "improve" the design. If you disagree with an assumed value, use it anyway — the spec is authoritative.`;
+
+// ─── Per-platform formatters ─────────────────────────────────────────────────
+
+function formatColors(colors: { name: string; value: string }[]): string {
+  if (colors.length === 0) return '(No color tokens extracted from :root — refer to BUILD.md for full design system)';
+  return colors.map(c => `  ${c.name}: ${c.value};`).join('\n');
+}
+
+function formatFonts(fonts: string[]): string {
+  if (fonts.length === 0) return '(No font families extracted — refer to BUILD.md for full font stack)';
+  return fonts.map(f => `  - ${f}`).join('\n');
+}
+
+function formatImages(urls: string[]): string {
+  if (urls.length === 0) return '(No image URLs found in spec — do not add any images)';
+  return urls.map(u => `  - ${u}`).join('\n');
+}
+
+function formatSections(sections: string[]): string {
+  if (sections.length === 0) return '(No sections available — the blueprint did not provide a section list. Do not invent sections.)';
+  return sections.map((s, i) => `  ${i + 1}. ${s}`).join('\n');
+}
+
+function formatContracts(contracts: string[]): string {
+  if (contracts.length === 0) return '(No layout contracts found in blueprint)';
+  return contracts.map(c => `  - ${c}`).join('\n');
+}
+
+function buildOutputFormatNote(target: BuildOutputTarget): string {
+  if (target === 'plain-html') {
+    return `\n## OUTPUT FORMAT\nProduce a single self-contained HTML file. Include a \`<style>\` block with a \`:root\` section for design tokens (CSS custom properties). Do not use Tailwind, React, or any build step. Inline all CSS in a <style> tag.`;
+  }
+  return `\n## OUTPUT FORMAT\nProduce a React + Tailwind CSS project. Provide a \`tailwind.config.js\` with the theme extension from the spec, and component files for each section. Use the CSS custom properties from the :root block as Tailwind theme values.`;
+}
+
+function buildLovablePrompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+
+  return `# Rebuild Prompt — Lovable
+
+## PURPOSE
+Rebuild the page described in the specification below, faithfully and exactly. Do not redesign, do not improve, do not add your own aesthetic opinion.
+
+## DESIGN SYSTEM (from real CSS)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${formatFonts(fonts)}
+${hasAssumed ? '\nNote: Some values in the spec are marked ASSUMED — they were inferred visually, not from CSS. Use them as given.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs in <img> tags)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+
+## LOVABLE-SPECIFIC INSTRUCTIONS
+- Build one component per section, in the order listed above.
+- Define CSS variables in a global stylesheet matching the :root block provided.
+- Use Lovable's component structure: each section is a separate React component file.
+- Import the design tokens as CSS variables, not hardcoded values.
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nThe design and structure were extracted from DIFFERENT sites. The visual design (colors, fonts, spacing) comes from one source, and the page structure (sections, text, images) comes from another. Apply the design system to the structure faithfully — do not mix up which site each came from.' : ''}`;
+}
+
+function buildBoltPrompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+
+  return `# Rebuild Prompt — Bolt
+
+## PROJECT FRAMING
+Build a complete project that reproduces the page described in the specification below. The project should be a single-page application using Vite + React + Tailwind CSS (or a single index.html if plain HTML was requested). Do not redesign or improve — reproduce faithfully.
+
+## DESIGN SYSTEM (from real CSS)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${formatFonts(fonts)}
+${hasAssumed ? '\nNote: Some values are marked ASSUMED — inferred visually, not from CSS. Use them as given.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+
+## BOLT-SPECIFIC INSTRUCTIONS
+- Frame this as a full project: provide the full file structure (package.json, vite.config, tailwind.config, src/ files).
+- If React/Tailwind: use a Vite structure with index.html as the entry point.
+- If plain HTML: produce a single index.html with inline <style> containing the :root block.
+- Each section should be its own component or clearly delimited block.
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
+}
+
+function buildV0Prompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+
+  return `# Rebuild Prompt — v0
+
+## PURPOSE
+Rebuild the page described in the specification below as a set of React components using shadcn/ui primitives and Tailwind CSS. Do not redesign — reproduce faithfully.
+
+## DESIGN SYSTEM (from real CSS)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${formatFonts(fonts)}
+${hasAssumed ? '\nNote: Some values are marked ASSUMED. Use them as given.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+
+## V0-SPECIFIC INSTRUCTIONS
+- Use shadcn/ui components as the base (Button, Card, Input, etc.) and style them with the design tokens above.
+- Each section is a component. Map the section list 1:1 to components.
+- Use Tailwind utility classes derived from the CSS variables in the :root block.
+- Do not add shadcn defaults that contradict the spec (e.g., don't use shadcn's default border radius if the spec says 0px).
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
+}
+
+function buildClaudeDesignPrompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+
+  return `# Rebuild Prompt — Claude Design
+
+## VISUAL ARTIFACT SPECIFICATION
+You are rebuilding a page from a detailed design specification extracted from a real website. Your goal is to match the specification exactly — every color, font, spacing value, and section must come from the spec, not from your own design judgment. This is a faithful reproduction, not a creative redesign.
+
+## DESIGN SYSTEM (from real CSS — match these exactly)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${formatFonts(fonts)}
+${hasAssumed ? '\nNote: Values marked ASSUMED were inferred visually. They are the best available estimate — use them as given, do not substitute your own.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs — they are real, public images from the original page)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+
+## CLAUDE-DESIGN-SPECIFIC INSTRUCTIONS
+- Treat this as a visual artifact: the output should look as close to the original page as possible.
+- Match the spec exactly — do not "improve" spacing, colors, or typography.
+- If the spec says a value is ASSUMED, use it. Do not second-guess visual inferences.
+- Every section in the list must appear in the output, in order, with the exact text from the spec.
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
+}
+
+function buildGenericPrompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+
+  return `# Rebuild Prompt
+
+## PURPOSE
+Rebuild the page described in the specification below. Reproduce it faithfully — do not redesign, do not improve, do not add aesthetic opinions.
+
+## DESIGN SYSTEM (from real CSS)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${formatFonts(fonts)}
+${hasAssumed ? '\nNote: Some values are marked ASSUMED — inferred visually, not from CSS. Use them as given.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
+}
+
+// ─── Main export ─────────────────────────────────────────────────────────────
+
+export function buildVibePrompt(
+  target: VibeTarget,
+  input: VibePromptInput,
+  buildTarget: BuildOutputTarget = 'react-tailwind',
+): string {
+  const outputTarget: BuildOutputTarget = buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html';
+
+  switch (target) {
+    case 'lovable': return buildLovablePrompt(input, outputTarget);
+    case 'bolt': return buildBoltPrompt(input, outputTarget);
+    case 'v0': return buildV0Prompt(input, outputTarget);
+    case 'claude-design': return buildClaudeDesignPrompt(input, outputTarget);
+    case 'generic': return buildGenericPrompt(input, outputTarget);
+  }
+}

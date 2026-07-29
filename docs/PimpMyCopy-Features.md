@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.5 | Last Updated: 2026-07-28T00:00:00Z -->
+<!-- Version: 8.6 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1723,6 +1723,80 @@ Where `{site}` is the hostname of the structure URL and `{url}` is the design UR
 - BUILD.md generation logic, its three-call split, and all its safeguards.
 - design.md and blueprint.json generation (still run internally in single mode as BUILD.md inputs).
 - The two-URL feature, platform detection, Rule 0.
+
+---
+
+### Builder Prompt Panel — Vibe Prompt Generator (2026-07-29)
+
+**Added:** 2026-07-29 — The Design Extractor now generates a ready-to-paste, platform-specific rebuild prompt alongside the existing outputs. The prompt is built from the pipeline's REAL extracted data (BUILD.md and blueprint.json) — never placeholders or invented copy.
+
+#### New File: `src/lib/vibePrompt.ts`
+
+Exports `buildVibePrompt(target, { buildMd, blueprintJson, provenance }, buildTarget)` and a `VIBE_TARGETS` list with five platforms:
+
+| Target ID | Label | Format Difference |
+|---|---|---|
+| `lovable` | Lovable | Section-by-section, CSS variables, component-per-section |
+| `bolt` | Bolt | Full-project framing, single index or Vite structure |
+| `v0` | v0 | Component-focused, shadcn references |
+| `claude-design` | Claude Design | Visual-artifact framing, emphasize matching the spec exactly |
+| `generic` | Any | Structured Purpose → Design → Sections → Rules |
+
+#### What Every Prompt Contains
+
+Every generated prompt includes these mandatory rules (non-negotiable):
+
+1. **EXACT IMAGES** — Use only the image URLs found in BUILD.md/blueprint.json. They are real, public, absolute URLs. Never placehold.co, never stock photos, never generated images.
+2. **EXACT COPY** — Use the exact text from the spec. Never rewrite, translate, or invent text. Explicitly forbids lorem ipsum AND "write copy that fits."
+3. **EXACT SECTIONS** — Build the exact sections from blueprint.json, in order. Never substitute a generic Hero/Features/Testimonials default. If no sections are available, says so explicitly; does not invent a section list.
+4. **LAYOUT CONTRACTS** — Respect every `must_preserve` and `do_not_do` rule from the blueprint.
+5. **ASSUMED VALUES** — Treat ASSUMED values as given, not as license to redesign.
+
+#### Data Extraction
+
+The module extracts real data from the already-generated BUILD.md and blueprint.json:
+
+- **Colors** — parsed from the `:root` block in BUILD.md using regex (CSS custom properties with hex/rgb/hsl values)
+- **Fonts** — parsed from `:root` font-family declarations and inline font-family rules in BUILD.md
+- **Image URLs** — extracted from both BUILD.md and blueprint.json (real absolute URLs ending in png/jpg/gif/webp/svg/avif/ico)
+- **Section names** — parsed from blueprint.json's `sections` array
+- **Layout contracts** — parsed from blueprint.json's `layout_contract` objects per section
+
+If the blueprint is not valid JSON or has no sections, the prompt explicitly states "no sections available" and instructs the builder not to invent sections.
+
+#### Output Format Note
+
+The prompt adapts its output-format instruction to the user's build target:
+- **React/Tailwind** — prompts for a React + Tailwind project with `tailwind.config.js` theme extension
+- **Plain HTML** — prompts for a single self-contained HTML file with a `:root` CSS block and inline `<style>`
+
+#### Cross-Site Caution
+
+If the provenance string indicates that design and structure came from different sites (two-URL mode), a "CROSS-SITE CAUTION" section is automatically appended to the generated prompt, warning the builder that the visual design and page structure came from different sources.
+
+#### UI Panel
+
+A "Prompt para builder" panel appears in the results area, below the file downloads. It is shown in both output modes (full and single-file). The panel contains:
+
+- **Platform selector** — five buttons (Lovable / Bolt / v0 / Claude Design / Any) to choose the target platform
+- **Read-only preview** — the generated prompt is shown in a collapsible code block (dark terminal-style)
+- **"Copiar prompt" button** — copies the prompt to clipboard with a "Copiado" confirmation
+- **Size indicator** — shows the prompt size in KB
+
+Switching the target platform regenerates the prompt instantly — no re-scrape needed. It is pure formatting over the already-generated BUILD.md and blueprint.json.
+
+#### What Did NOT Change
+
+- BUILD.md, design.md, and blueprint.json generation — completely untouched
+- The real-asset / verbatim-copy / real-section guarantees — the prompt panel reinforces these, never contradicts them
+- No placehold.co or placeholder-image behavior was introduced anywhere
+
+#### Files
+
+| File | Purpose |
+|---|---|
+| `src/lib/vibePrompt.ts` | New — `buildVibePrompt()` function, `VIBE_TARGETS` list, regex helpers for extracting colors/fonts/images/sections/contracts from BUILD.md and blueprint.json |
+| `src/components/DesignExtractor.tsx` | Modified — imports `buildVibePrompt` and `VIBE_TARGETS`, adds `vibeTarget` state, adds `VibePromptPanel` sub-component, renders panel in results area |
 
 ---
 
