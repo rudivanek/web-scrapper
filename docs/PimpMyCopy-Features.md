@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.15 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.16 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1806,12 +1806,15 @@ Switching the target platform regenerates the prompt instantly — no re-scrape 
 
 #### Output Mode Toggle
 
-The "Formato de salida" control now has three options:
-1. **Completo** (design.md + blueprint.json + BUILD.md) — default, unchanged
-2. **Un solo archivo** (para otro LLM) — unchanged
-3. **Blueprinter** (design.md + copy.md + images.md) — new
+The "Formato de salida" control now shows ONLY the Blueprinter option. The two other modes ("Completo" and "Un solo archivo") have been removed from the UI — their radio buttons are no longer rendered. Instead, a static label is shown:
 
-Stored as `outputMode = 'full' | 'single' | 'blueprinter'`. The 'full' and 'single' modes behave exactly as before.
+```
+Blueprinter    design.md + copy.md + images.md
+```
+
+`outputMode` is hardcoded to `'blueprinter'` as the default and never changes from the UI. The 'full' and 'single' code paths remain intact in the codebase (the pipeline logic, the Claude calls for blueprint.json and BUILD.md, the single-file consolidation) — they are simply unreachable from the UI. If needed later, the radio buttons can be restored without a rebuild.
+
+The Blueprinter pipeline runs exactly as before: design.md + copy.md + images.md, with the copy-source and image-source selectors, Lorem option, and Unsplash toggle all still working.
 
 #### Blueprinter Pipeline
 
@@ -2022,7 +2025,7 @@ The panel displays a note reminding the user they must attach their own inspirat
 
 #### What Did NOT Change
 
-- 'full' and 'single' output modes — completely unchanged
+- 'full' and 'single' output modes — code paths intact but hidden from the UI; `outputMode` defaults to `'blueprinter'` and the radio selector is replaced with a static label
 - design.md generation, extract-css, platform detection, frequency analysis
 - The vibePrompt panel's other targets (Lovable, Bolt, v0, Claude Design, Generic)
 - Rule 0 and NOT FOUND in design.md

@@ -359,7 +359,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [structureUrl, setStructureUrl] = useState('');
   const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
-  const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('full');
+  const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('blueprinter');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
@@ -1042,46 +1042,12 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         )}
       </div>
 
-      {/* Output mode selector */}
+      {/* Output mode — Blueprinter only */}
       <div className="mb-6">
         <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Formato de salida</span>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'full' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-            <input
-              type="radio"
-              name="outputMode"
-              value="full"
-              checked={outputMode === 'full'}
-              onChange={() => setOutputMode('full')}
-              disabled={isRunning}
-              className="w-4 h-4"
-            />
-            <span className="text-sm text-gray-700">Completo (design.md + blueprint.json + BUILD.md) — por defecto</span>
-          </label>
-          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'single' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-            <input
-              type="radio"
-              name="outputMode"
-              value="single"
-              checked={outputMode === 'single'}
-              onChange={() => setOutputMode('single')}
-              disabled={isRunning}
-              className="w-4 h-4"
-            />
-            <span className="text-sm text-gray-700">Un solo archivo (para otro LLM)</span>
-          </label>
-          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'blueprinter' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-            <input
-              type="radio"
-              name="outputMode"
-              value="blueprinter"
-              checked={outputMode === 'blueprinter'}
-              onChange={() => setOutputMode('blueprinter')}
-              disabled={isRunning}
-              className="w-4 h-4"
-            />
-            <span className="text-sm text-gray-700">Blueprinter (design.md + copy.md + images.md)</span>
-          </label>
+        <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-900 bg-gray-50">
+          <span className="text-sm font-medium text-gray-800">Blueprinter</span>
+          <span className="text-xs text-gray-500">design.md + copy.md + images.md</span>
         </div>
       </div>
 
