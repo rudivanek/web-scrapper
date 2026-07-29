@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.6 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.7 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1757,7 +1757,7 @@ Every generated prompt includes these mandatory rules (non-negotiable):
 The module extracts real data from the already-generated BUILD.md and blueprint.json:
 
 - **Colors** — parsed from the `:root` block in BUILD.md using regex (CSS custom properties with hex/rgb/hsl values)
-- **Fonts** — parsed from `:root` font-family declarations and inline font-family rules in BUILD.md
+- **Fonts** — parsed into three separate groups: font families (from `font-family` declarations only — never font-weight or font-size), font weights (numeric values from `font-weight` rules), and heading sizes (from heading selectors or `--heading-*` CSS variables). System-font artifacts (`SF NS`, `-apple-system`, `BlinkMacSystemFont`, `system-ui`, `Segoe UI`) are stripped from the family list when they appear as standalone families; they are kept only inside fallback stacks. For loadable families (e.g. Manrope), a "Load from Google Fonts" line is added.
 - **Image URLs** — extracted from both BUILD.md and blueprint.json (real absolute URLs ending in png/jpg/gif/webp/svg/avif/ico)
 - **Section names** — parsed from blueprint.json's `sections` array
 - **Layout contracts** — parsed from blueprint.json's `layout_contract` objects per section

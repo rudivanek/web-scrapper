@@ -41,28 +41,83 @@ function extractColors(buildMd: string): { name: string; value: string }[] {
   return colors;
 }
 
-function extractFonts(buildMd: string): string[] {
-  const fonts: string[] = [];
+const SYSTEM_FONT_NAMES = ['SF NS', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'Segoe UI'];
+
+function isStandaloneSystemFont(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  return SYSTEM_FONT_NAMES.some(n => v === n.toLowerCase());
+}
+
+function stripSystemFonts(families: string[]): string[] {
+  return families.filter(f => !isStandaloneSystemFont(f));
+}
+
+function extractLoadableFamilyNames(families: string[]): string[] {
+  const names: string[] = [];
   const seen = new Set<string>();
+  for (const stack of families) {
+    const parts = stack.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
+    for (const part of parts) {
+      if (isStandaloneSystemFont(part)) continue;
+      const key = part.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        names.push(part);
+      }
+    }
+  }
+  return names;
+}
+
+interface FontData {
+  families: string[];
+  weights: string[];
+  headingSizes: string[];
+}
+
+function extractFonts(buildMd: string): FontData {
   const rootBlock = extractRootBlock(buildMd);
-  const fontRe = /--(?:font-[\w-]*|heading-font|body-font|font-family)\s*:\s*([^;]+);/g;
+  const families: string[] = [];
+  const weights: string[] = [];
+  const headingSizes: string[] = [];
+  const seenFamily = new Set<string>();
+  const seenWeight = new Set<string>();
+  const seenSize = new Set<string>();
   let m: RegExpExecArray | null;
-  while ((m = fontRe.exec(rootBlock)) !== null) {
+
+  const familyRe = /--(?:font-family|heading-font|body-font|font-[\w-]*family)\s*:\s*([^;]+);/g;
+  while ((m = familyRe.exec(rootBlock)) !== null) {
     const f = m[1].trim();
-    if (!seen.has(f)) {
-      seen.add(f);
-      fonts.push(f);
-    }
+    if (!seenFamily.has(f)) { seenFamily.add(f); families.push(f); }
   }
-  const inlineFontRe = /font-family\s*:\s*([^;]+);/g;
-  while ((m = inlineFontRe.exec(buildMd)) !== null) {
+  const inlineFamilyRe = /font-family\s*:\s*([^;]+);/g;
+  while ((m = inlineFamilyRe.exec(buildMd)) !== null) {
     const f = m[1].trim();
-    if (!seen.has(f)) {
-      seen.add(f);
-      fonts.push(f);
-    }
+    if (!seenFamily.has(f)) { seenFamily.add(f); families.push(f); }
   }
-  return fonts;
+
+  const weightRe = /font-weight\s*:\s*(\d+)/g;
+  while ((m = weightRe.exec(rootBlock)) !== null) {
+    const w = m[1];
+    if (!seenWeight.has(w)) { seenWeight.add(w); weights.push(w); }
+  }
+  while ((m = weightRe.exec(buildMd)) !== null) {
+    const w = m[1];
+    if (!seenWeight.has(w)) { seenWeight.add(w); weights.push(w); }
+  }
+
+  const headingSizeRe = /(?:h[1-6][^{]*\{|\.heading|\.title|--heading-[\w-]*size|--font-size-heading)\s*[^}]*?font-size\s*:\s*([^;}]+)/g;
+  while ((m = headingSizeRe.exec(buildMd)) !== null) {
+    const s = m[1].trim();
+    if (!seenSize.has(s)) { seenSize.add(s); headingSizes.push(s); }
+  }
+  const headingVarRe = /--(?:heading-[\w-]*|h[1-6]-[\w-]*)\s*:\s*([^;]+);/g;
+  while ((m = headingVarRe.exec(rootBlock)) !== null) {
+    const s = m[1].trim();
+    if (/px|rem|em/.test(s) && !seenSize.has(s)) { seenSize.add(s); headingSizes.push(s); }
+  }
+
+  return { families: stripSystemFonts(families), weights, headingSizes };
 }
 
 function extractImageUrls(buildMd: string, blueprintJson: string): string[] {
@@ -151,9 +206,25 @@ function formatColors(colors: { name: string; value: string }[]): string {
   return colors.map(c => `  ${c.name}: ${c.value};`).join('\n');
 }
 
-function formatFonts(fonts: string[]): string {
-  if (fonts.length === 0) return '(No font families extracted — refer to BUILD.md for full font stack)';
-  return fonts.map(f => `  - ${f}`).join('\n');
+function formatFonts(fontData: FontData): string {
+  const lines: string[] = [];
+  const { families, weights, headingSizes } = fontData;
+  if (families.length === 0) {
+    lines.push('Font families: (No font families extracted — refer to BUILD.md for full font stack)');
+  } else {
+    lines.push(`Font families: ${families.join(', ')}`);
+    const loadable = extractLoadableFamilyNames(families);
+    if (loadable.length > 0) {
+      lines.push(`Load from Google Fonts: ${loadable.join(', ')}`);
+    }
+  }
+  if (weights.length > 0) {
+    lines.push(`Font weights: ${weights.join(', ')}`);
+  }
+  if (headingSizes.length > 0) {
+    lines.push(`Heading sizes: ${headingSizes.join(', ')}`);
+  }
+  return lines.join('\n');
 }
 
 function formatImages(urls: string[]): string {
@@ -185,6 +256,7 @@ function buildLovablePrompt(input: VibePromptInput, target: BuildOutputTarget): 
   const sections = extractSectionNames(input.blueprintJson);
   const contracts = extractLayoutContracts(input.blueprintJson);
   const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
 
   return `# Rebuild Prompt — Lovable
 
@@ -198,7 +270,7 @@ ${formatColors(colors)}
 }
 \`\`\`
 Fonts:
-${formatFonts(fonts)}
+${fontsBlock}
 ${hasAssumed ? '\nNote: Some values in the spec are marked ASSUMED — they were inferred visually, not from CSS. Use them as given.' : ''}
 
 ## SECTIONS (build in this exact order)
@@ -227,6 +299,7 @@ function buildBoltPrompt(input: VibePromptInput, target: BuildOutputTarget): str
   const sections = extractSectionNames(input.blueprintJson);
   const contracts = extractLayoutContracts(input.blueprintJson);
   const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
 
   return `# Rebuild Prompt — Bolt
 
@@ -240,7 +313,7 @@ ${formatColors(colors)}
 }
 \`\`\`
 Fonts:
-${formatFonts(fonts)}
+${fontsBlock}
 ${hasAssumed ? '\nNote: Some values are marked ASSUMED — inferred visually, not from CSS. Use them as given.' : ''}
 
 ## SECTIONS (build in this exact order)
@@ -269,6 +342,7 @@ function buildV0Prompt(input: VibePromptInput, target: BuildOutputTarget): strin
   const sections = extractSectionNames(input.blueprintJson);
   const contracts = extractLayoutContracts(input.blueprintJson);
   const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
 
   return `# Rebuild Prompt — v0
 
@@ -282,7 +356,7 @@ ${formatColors(colors)}
 }
 \`\`\`
 Fonts:
-${formatFonts(fonts)}
+${fontsBlock}
 ${hasAssumed ? '\nNote: Some values are marked ASSUMED. Use them as given.' : ''}
 
 ## SECTIONS (build in this exact order)
@@ -311,6 +385,7 @@ function buildClaudeDesignPrompt(input: VibePromptInput, target: BuildOutputTarg
   const sections = extractSectionNames(input.blueprintJson);
   const contracts = extractLayoutContracts(input.blueprintJson);
   const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
 
   return `# Rebuild Prompt — Claude Design
 
@@ -324,7 +399,7 @@ ${formatColors(colors)}
 }
 \`\`\`
 Fonts:
-${formatFonts(fonts)}
+${fontsBlock}
 ${hasAssumed ? '\nNote: Values marked ASSUMED were inferred visually. They are the best available estimate — use them as given, do not substitute your own.' : ''}
 
 ## SECTIONS (build in this exact order)
@@ -353,6 +428,7 @@ function buildGenericPrompt(input: VibePromptInput, target: BuildOutputTarget): 
   const sections = extractSectionNames(input.blueprintJson);
   const contracts = extractLayoutContracts(input.blueprintJson);
   const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
 
   return `# Rebuild Prompt
 
@@ -366,7 +442,7 @@ ${formatColors(colors)}
 }
 \`\`\`
 Fonts:
-${formatFonts(fonts)}
+${fontsBlock}
 ${hasAssumed ? '\nNote: Some values are marked ASSUMED — inferred visually, not from CSS. Use them as given.' : ''}
 
 ## SECTIONS (build in this exact order)
