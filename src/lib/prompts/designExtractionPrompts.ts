@@ -238,6 +238,25 @@ Every uncommented declaration must be a real, valid CSS value. The NOT FOUND mar
 | Token Source | [declared custom properties | derived from frequency analysis | Tailwind utility classes] |
 | Detection Signals | [list matched signals] |
 
+## Guía rápida (Do's & Don'ts)
+
+Derive every line below from values actually extracted above. If a value is NOT FOUND, omit that line — do not write a rule about a value you could not confirm. Keep this to 6 lines maximum. Write in Spanish.
+
+- ✓ Usa {heading font name} para títulos y {body font name} para texto.
+- ✓ Mantén el color de acento {primary hex} solo para CTAs y enlaces.
+- ✓ Respeta el sistema de espaciado base de {spacing value}px.
+- ✗ No uses sombras pesadas — el sitio usa elevación sutil / ninguna.
+- ✗ No redondees los botones si el sitio usa esquinas rectas ({radius value or "sin radio"}).
+- ✗ No cambies la familia tipográfica — el sitio usa {font name} de forma consistente.
+
+Rules for generating these lines:
+- Replace every {placeholder} with the real extracted value. If the value is NOT FOUND, delete that entire line.
+- Generate the ✗ rules based on what the site AVOIDS: no border-radius found → "keep corners square"; subtle or no shadows → "don't add heavy shadows"; single font family → "don't switch fonts".
+- Never exceed 6 lines total (count both ✓ and ✗ lines).
+- These are guardrails for the builder, not documentation — keep each line short.
+
+---
+
 ## Color Palette
 
 ### Primary Colors

@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.14 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.15 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1893,6 +1893,68 @@ Este texto es de relleno, NO es contenido real. Reemplázalo con copy definitivo
 
 In the builder prompt (vibe panel), when copyMode is lorem, an additional warning is added:
 > The copy is Lorem Ipsum placeholder — use it to render the layout, but it is NOT real content. Do not treat it as meaningful text.
+
+#### Footer Column Detection (src/lib/copyExporter.ts — detectFooterColumns)
+
+The ## Footer section in copy.md now preserves column structure from the DOM instead of outputting a flat list. The detector:
+
+1. Scans for grouped containers (div, ul, nav, section, aside, article, address) inside each `<footer>` that contain 2+ links.
+2. Extracts each column's heading (h1-h6, or a short p/span/strong acting as a label).
+3. Classifies each column by type: `links` (nav column), `contact` (phone/email/address), `social` (Facebook, Instagram, LinkedIn, etc.), `copyright` (© / legal / privacy / cookies).
+4. If columns can't be detected (fewer than 2 grouped containers), outputs a flat list with a comment: `<!-- footer links (agrupar en columnas al construir) -->` so the builder knows to group them.
+5. Copyright/legal lines are always separated into their own block with `<!-- copyright / legal -->`.
+
+Output format (grouped):
+```
+## Footer
+
+### Explora
+- Clientes
+- Certificaciones
+- Blog
+
+### Servicios
+- Capacitación Personalizada
+- ...
+
+### Contacto
+- Tel: ...
+- ...
+
+### Redes sociales
+- Facebook
+- Instagram
+
+<!-- copyright / legal -->
+© 2024 Empresa. Todos los derechos reservados.
+
+<!-- END OF COPY -->
+```
+
+The file always ends with `<!-- END OF COPY -->` so the builder knows there is no more content and does not pad the footer with extra whitespace.
+
+In Lorem mode, the SAME grouped footer structure is generated — just with Lorem words. The `loremifyFooterColumns()` function replaces each column's heading and lines with Lorem Ipsum while preserving the column count, type classification, and ordering. This ensures layout tests in Lorem mode accurately reflect the real footer's structure.
+
+#### Guía rápida (Do's & Don'ts) in design.md (src/lib/prompts/designExtractionPrompts.ts)
+
+A new section appears near the top of design.md, after Platform and before Colors:
+
+```
+## Guía rápida (Do's & Don'ts)
+- ✓ Usa {heading font} para títulos y {body font} para texto.
+- ✓ Mantén el color de acento {primary hex} solo para CTAs y enlaces.
+- ✓ Respeta el sistema de espaciado base de {spacing value}px.
+- ✗ No uses sombras pesadas — el sitio usa elevación sutil / ninguna.
+- ✗ No redondees los botones si el sitio usa esquinas rectas ({radius}).
+- ✗ No cambies la familia tipográfica — el sitio usa {font} de forma consistente.
+```
+
+Rules:
+- Every line is derived from actually-extracted values. If a value is NOT FOUND, that line is omitted entirely.
+- Maximum 6 lines total (✓ and ✗ combined).
+- Written in Spanish (matches the rest of the Spanish-market output).
+- The ✗ rules are based on what the site AVOIDS: no border-radius found → "keep corners square"; subtle or no shadows → "don't add heavy shadows"; single font family → "don't switch fonts".
+- These are guardrails for the builder, not documentation — each line is short.
 
 #### Image Source Selector (Blueprinter mode)
 

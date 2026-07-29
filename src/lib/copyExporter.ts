@@ -113,6 +113,193 @@ function collectAllText(el: Element): string[] {
   return lines;
 }
 
+// ─── Footer column detection ───────────────────────────────────────────────────
+
+interface FooterColumn {
+  heading: string | null;
+  lines: string[];
+  type: 'links' | 'contact' | 'social' | 'copyright';
+}
+
+const SOCIAL_DOMAINS = ['facebook', 'twitter', 'x.com', 'instagram', 'linkedin', 'youtube', 'tiktok', 'pinterest', 'github', 'whatsapp', 'telegram', 'discord', 'spotify', 'vimeo'];
+
+function isSocialLink(el: Element): boolean {
+  if (el.tagName !== 'A') return false;
+  const href = (el.getAttribute('href') || '').toLowerCase();
+  return SOCIAL_DOMAINS.some(d => href.includes(d));
+}
+
+function isContactText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\b(tel|tel\xe9fono|phone|fax):?\s*\+?\d/i.test(lower)
+    || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)
+    || /\b(calle|av\.?|avenida|carretera|address|dir):?\s/i.test(lower)
+    || /\b\d{3}\s\d{3}\s\d{3}\b/.test(text);
+}
+
+function isCopyrightText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\xa9|copyright|\btodos los derechos reservados\b|\ball rights reserved\b|\baviso legal\b|\bpol\xedtica de privacidad\b|\bcookies\b/.test(lower);
+}
+
+function detectFooterColumns(footer: Element): { columns: FooterColumn[]; flat: boolean } {
+  const columns: FooterColumn[] = [];
+  const seen = new Set<Element>();
+
+  // Strategy 1: Look for grouped containers (div, ul, nav, section, aside) inside the footer
+  // that each contain a heading + links, or a group of links.
+  const candidateContainers: Element[] = [];
+
+  // Direct children that are containers
+  for (const child of Array.from(footer.children)) {
+    const tag = child.tagName.toLowerCase();
+    if (['div', 'ul', 'nav', 'section', 'aside', 'article', 'address'].includes(tag)) {
+      const links = child.querySelectorAll('a, button, [role="button"]');
+      if (links.length >= 2) {
+        candidateContainers.push(child);
+      }
+    }
+  }
+
+  // If no direct-child containers, try one level deeper
+  if (candidateContainers.length === 0) {
+    for (const child of Array.from(footer.children)) {
+      for (const grandchild of Array.from(child.children)) {
+        const tag = grandchild.tagName.toLowerCase();
+        if (['div', 'ul', 'nav', 'section', 'aside', 'article', 'address'].includes(tag)) {
+          const links = grandchild.querySelectorAll('a, button, [role="button"]');
+          if (links.length >= 2) {
+            candidateContainers.push(grandchild);
+          }
+        }
+      }
+    }
+  }
+
+  if (candidateContainers.length >= 2) {
+    for (const container of candidateContainers) {
+      if (seen.has(container)) continue;
+      seen.add(container);
+
+      // Find heading within the container
+      let heading: string | null = null;
+      for (const hTag of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']) {
+        const h = container.querySelector(hTag);
+        if (h) {
+          heading = getVisibleText(h);
+          if (heading) break;
+        }
+      }
+      // If no heading tag, check for a <p> or <span> that looks like a label (short, bold-ish)
+      if (!heading) {
+        const firstText = container.querySelector('p, span, strong, b');
+        if (firstText) {
+          const t = getVisibleText(firstText);
+          if (t && t.length <= 30 && t.split(/\s+/).length <= 4) heading = t;
+        }
+      }
+
+      const lines: string[] = [];
+      let allSocial = true;
+      let allContact = true;
+
+      for (const el of container.querySelectorAll('a, button, [role="button"], p, li, span')) {
+        if (shouldSkipElement(el)) continue;
+        if (seen.has(el)) continue;
+        const text = getVisibleText(el);
+        if (!text) continue;
+        seen.add(el);
+
+        if (!isSocialLink(el)) allSocial = false;
+        if (!isContactText(text)) allContact = false;
+
+        const extracted = extractTextFromElement(el);
+        lines.push(extracted || text);
+      }
+
+      if (lines.length === 0) continue;
+
+      let type: FooterColumn['type'] = 'links';
+      if (allSocial) type = 'social';
+      else if (allContact) type = 'contact';
+
+      columns.push({ heading, lines, type });
+    }
+  }
+
+  // Collect remaining footer content not captured by columns
+  const remaining: string[] = [];
+  for (const el of footer.querySelectorAll('a, button, [role="button"], p, li, h1, h2, h3, h4, h5, h6, span')) {
+    if (shouldSkipElement(el)) continue;
+    if (seen.has(el)) continue;
+    const text = getVisibleText(el);
+    if (!text) continue;
+    seen.add(el);
+    const extracted = extractTextFromElement(el);
+    remaining.push(extracted || text);
+  }
+
+  // Classify remaining items
+  const copyrightLines: string[] = remaining.filter(l => isCopyrightText(l));
+  const contactLines: string[] = remaining.filter(l => isContactText(l) && !isCopyrightText(l));
+  const otherLines: string[] = remaining.filter(l => !isCopyrightText(l) && !isContactText(l));
+
+  if (copyrightLines.length > 0) {
+    columns.push({ heading: null, lines: copyrightLines, type: 'copyright' });
+  }
+  if (contactLines.length > 0 && columns.filter(c => c.type === 'contact').length === 0) {
+    columns.push({ heading: null, lines: contactLines, type: 'contact' });
+  }
+  if (otherLines.length > 0 && columns.length === 0) {
+    // No columns detected — flat fallback
+    return { columns: [{ heading: null, lines: otherLines, type: 'links' }], flat: true };
+  }
+  if (otherLines.length > 0) {
+    columns.push({ heading: null, lines: otherLines, type: 'links' });
+  }
+
+  return { columns, flat: false };
+}
+
+function formatFooterColumns(columns: FooterColumn[], flat: boolean): string[] {
+  const lines: string[] = [];
+  if (flat) {
+    lines.push('<!-- footer links (agrupar en columnas al construir) -->');
+    for (const col of columns) {
+      lines.push(...col.lines);
+    }
+    return lines;
+  }
+  for (const col of columns) {
+    if (col.type === 'copyright') {
+      lines.push('<!-- copyright / legal -->');
+      lines.push(...col.lines);
+      lines.push('');
+      continue;
+    }
+    if (col.type === 'social') {
+      lines.push('### Redes sociales');
+    } else if (col.type === 'contact') {
+      lines.push('### Contacto');
+    } else if (col.heading) {
+      lines.push(`### ${col.heading}`);
+    } else {
+      lines.push('### Enlaces');
+    }
+    lines.push(...col.lines);
+    lines.push('');
+  }
+  return lines;
+}
+
+function loremifyFooterColumns(columns: FooterColumn[], rng: () => number): FooterColumn[] {
+  return columns.map(col => ({
+    heading: col.heading ? titleCase(pickWords(rng, 2 + Math.floor(rng() * 3))) : null,
+    lines: col.lines.map(() => pickWords(rng, 2 + Math.floor(rng() * 3))),
+    type: col.type,
+  }));
+}
+
 export function buildCopyMarkdown(rawHtml: string, pageUrl: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(rawHtml, 'text/html');
@@ -186,14 +373,14 @@ export function buildCopyMarkdown(rawHtml: string, pageUrl: string): string {
   walk(body);
 
   const navLines: string[] = [];
-  const footerLines: string[] = [];
+  const footerColumns: { columns: FooterColumn[]; flat: boolean }[] = [];
   for (const nav of body.querySelectorAll('nav')) {
     if (shouldSkipElement(nav)) continue;
     navLines.push(...collectAllText(nav));
   }
   for (const footer of body.querySelectorAll('footer')) {
     if (shouldSkipElement(footer)) continue;
-    footerLines.push(...collectAllText(footer));
+    footerColumns.push(detectFooterColumns(footer));
   }
 
   const sectionGroups = new Map<Element, string[]>();
@@ -245,12 +432,16 @@ export function buildCopyMarkdown(rawHtml: string, pageUrl: string): string {
     parts.push('');
   }
 
-  if (footerLines.length > 0) {
+  if (footerColumns.length > 0) {
     parts.push('## Footer');
     parts.push('');
-    parts.push(...footerLines);
+    for (const fc of footerColumns) {
+      parts.push(...formatFooterColumns(fc.columns, fc.flat));
+    }
     parts.push('');
   }
+
+  parts.push('<!-- END OF COPY -->');
 
   return parts.join('\n');
 }
@@ -429,7 +620,7 @@ export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string
   walk(body);
 
   const navLines: string[] = [];
-  const footerLines: string[] = [];
+  const footerColumns: { columns: FooterColumn[]; flat: boolean }[] = [];
   for (const nav of body.querySelectorAll('nav')) {
     if (shouldSkipElement(nav)) continue;
     for (const el of nav.querySelectorAll('a, button, [role="button"]')) {
@@ -442,13 +633,11 @@ export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string
   }
   for (const footer of body.querySelectorAll('footer')) {
     if (shouldSkipElement(footer)) continue;
-    for (const el of footer.querySelectorAll('a, button, p, li, h1, h2, h3, h4, h5, h6')) {
-      const text = getVisibleText(el);
-      if (text) {
-        const lorem = generateLoremForElement(el, text, rng);
-        if (lorem) footerLines.push(lorem);
-      }
-    }
+    const detected = detectFooterColumns(footer);
+    footerColumns.push({
+      columns: loremifyFooterColumns(detected.columns, rng),
+      flat: detected.flat,
+    });
   }
 
   const sectionGroups = new Map<Element, string[]>();
@@ -500,13 +689,20 @@ export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string
     parts.push('');
   }
 
-  if (footerLines.length > 0) {
+  if (footerColumns.length > 0) {
     parts.push('## Footer');
     parts.push('');
-    parts.push(...footerLines);
+    for (const fc of footerColumns) {
+      parts.push(...formatFooterColumns(fc.columns, fc.flat));
+    }
     parts.push('');
   }
+
+  parts.push('<!-- END OF COPY -->');
 
   return parts.join('\n');
 }
 
+
+
+export { buildCopyMarkdown, buildCopyMarkdownLorem }
