@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.11 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.12 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1800,16 +1800,16 @@ Switching the target platform regenerates the prompt instantly — no re-scrape 
 
 ---
 
-### Blueprinter Output Mode — design.md + copy.md (2026-07-29)
+### Blueprinter Output Mode — design.md + copy.md + images.md (2026-07-29)
 
-**Added:** 2026-07-29 — A third output mode "Blueprinter" that emits exactly two files: design.md (styling) and copy.md (visible text). No blueprint.json, no BUILD.md. Designed for the workflow where the user supplies their own inspiration screenshot for layout, design.md provides the styling, and copy.md provides the text.
+**Added:** 2026-07-29 — A third output mode "Blueprinter" that emits exactly three files: design.md (styling), copy.md (visible text), and images.md (real image URLs extracted from the scraped page). No blueprint.json, no BUILD.md. Designed for the workflow where the user supplies their own inspiration screenshot for layout, design.md provides the styling, copy.md provides the text, and images.md provides the real images to place.
 
 #### Output Mode Toggle
 
 The "Formato de salida" control now has three options:
 1. **Completo** (design.md + blueprint.json + BUILD.md) — default, unchanged
 2. **Un solo archivo** (para otro LLM) — unchanged
-3. **Blueprinter** (design.md + copy.md) — new
+3. **Blueprinter** (design.md + copy.md + images.md) — new
 
 Stored as `outputMode = 'full' | 'single' | 'blueprinter'`. The 'full' and 'single' modes behave exactly as before.
 
@@ -1821,14 +1821,14 @@ When `outputMode === 'blueprinter'`, the pipeline runs exactly 5 phases and skip
 2. **Phase 2 — Scrape copy source (URL B, or A if empty)** — Firecrawl scrape for rawHtml
 3. **Phase 3 — Fetch external stylesheets (URL A)** — extract-css
 4. **Phase 4 — Generate design.md (Claude)** — the only LLM call in this mode
-5. **Phase 5 — Extract copy.md (deterministic)** — DOM parsing, no Claude call, near-instant
+5. **Phase 5 — Extract copy.md + images.md (deterministic)** — DOM parsing, no Claude call, near-instant
 
 The phase progress bar displays only these 5 phases in Blueprinter mode. In 'full' and 'single' modes, the full 5- or 6-phase pipeline (including blueprint JSON and BUILD.md) runs unchanged.
 
 copy.md section grouping derives directly from the rawHtml DOM (nearest section/header ancestor), NOT from the generated blueprint JSON. The `buildCopyMarkdown()` function in `src/lib/copyExporter.ts` is completely independent of blueprint JSON — it parses the HTML with DOMParser and walks the DOM tree to group text by section. This ensures copy extraction works even though blueprint JSON is never generated in this mode.
 
-- Presents exactly two download cards: design.md and copy.md.
-- copy.md is always included in the output when `outputMode === 'blueprinter'`.
+- Presents exactly three download cards: design.md, copy.md, and images.md.
+- copy.md and images.md are always included in the output when `outputMode === 'blueprinter'`.
 
 #### Dual URL Support
 
@@ -1839,7 +1839,7 @@ copy.md may be sourced from a different URL than design.md, reusing the existing
 
 In Blueprinter mode the second URL field is relabelled "URL de texto/copy (opcional)" with helper text "De dónde extraer el texto. Vacío = usar la URL de diseño." The "¿De dónde viene el texto?" radio group is hidden entirely in this mode — the field IS the copy source, so the distinction is redundant. In 'full' and 'single' modes the original label "URL de estructura (opcional)" and radio group remain unchanged.
 
-The header description is also mode-aware: Blueprinter mode shows "Blueprinter: extrae design.md (estilo) y copy.md (texto). Aporta tú la estructura con un screenshot." instead of the default three-phase pipeline description.
+The header description is also mode-aware: Blueprinter mode shows "Blueprinter: extrae design.md (estilo), copy.md (texto) e images.md (imágenes). Aporta tú la estructura con un screenshot." instead of the default three-phase pipeline description.
 
 #### copy.md Format (src/lib/copyExporter.ts)
 
@@ -1856,15 +1856,41 @@ A new file `src/lib/copyExporter.ts` exports `buildCopyMarkdown(rawHtml, pageUrl
 - **Original language preserved verbatim** — never translated, summarised, rewritten, or improved
 - **File header:** "# Copy — {pageUrl}\nTodo el texto visible de la página, en orden. Úsalo tal cual; no lo reescribas."
 
+#### images.md Format (src/lib/imageExporter.ts)
+
+A new file `src/lib/imageExporter.ts` exports `buildImageMarkdown(sources, fillUnsplash?) → string`. It performs deterministic DOM parsing (no LLM call) and extracts real image URLs from the scraped page(s):
+
+- **Reuses** `extractAssetManifest()` from `src/lib/assetExtractor.ts` — does not rewrite asset extraction logic
+- **Source selection:**
+  - Always extracts from URL DE DISEÑO (labelled `(diseño)`)
+  - Also extracts from URL DE TEXTO/COPY if filled and different (labelled `(copy)`)
+- **Per image:** absolute URL, alt text, width/height if present, nearest section/heading for placement context, source label
+- **Filters:** skips tracking pixels, spacers, and images under 32px in both dimensions
+- **Grouped by section** in document order (## Hero, ## Servicios, etc.) with logos, blog thumbnails, and icons under labelled groups
+- **Header:** "# Imágenes — {sources}\nImágenes reales extraídas de la(s) página(s). Úsalas en las secciones correspondientes. Las marcadas [UNSPLASH] son de relleno genérico, no reales."
+
+#### Optional Unsplash Filler
+
+A checkbox appears in Blueprinter mode: "Rellenar huecos con imágenes de Unsplash (genéricas)". Default OFF.
+
+When ON, after real extraction, for common slot types that had NO real image (sections without any extracted image), an Unsplash search URL is added keyed off the section's heading text. Every Unsplash entry is marked clearly:
+
+```
+- https://source.unsplash.com/... — [UNSPLASH — relleno genérico, reemplazar]
+```
+
+Unsplash NEVER replaces a real image — it only fills slots with none. Real images from the scraped pages always take priority and are visually distinct from Unsplash entries in the file.
+
 #### Builder Prompt for Blueprinter Mode
 
-In the vibePrompt panel, when `outputMode === 'blueprinter'`, the generated prompt is shaped for the three-input workflow:
+In the vibePrompt panel, when `outputMode === 'blueprinter'`, the generated prompt is shaped for the four-input workflow:
 
-> Build a web page from three inputs, each with one job:
+> Build a web page from four inputs, each with one job:
 > 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 > 2. DESIGN SYSTEM — from design.md. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
 > 3. COPY — from copy.md. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
-> Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text.
+> 4. IMAGES — from images.md. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.
+> Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
 The panel displays a note reminding the user they must attach their own inspiration screenshot — the app does not supply one in this mode.
 
@@ -1873,8 +1899,9 @@ The panel displays a note reminding the user they must attach their own inspirat
 | File | Changes |
 |---|---|
 | `src/lib/copyExporter.ts` | New file — deterministic DOM-to-markdown copy extractor |
-| `src/lib/vibePrompt.ts` | Added `buildBlueprinterPrompt()` function for the three-input workflow |
-| `src/components/DesignExtractor.tsx` | Extended outputMode to include 'blueprinter'; added third radio button; skip blueprint/BUILD.md calls in blueprinter mode; generate copy.md from structure source HTML; show design.md + copy.md panels; pass blueprinter props to VibePromptPanel; add screenshot-attach note |
+| `src/lib/imageExporter.ts` | New file — deterministic image URL extractor; reuses assetExtractor.ts; optional Unsplash filler |
+| `src/lib/vibePrompt.ts` | Added `buildBlueprinterPrompt()` function for the four-input workflow; accepts optional imagesMd |
+| `src/components/DesignExtractor.tsx` | Extended outputMode to include 'blueprinter'; added third radio button; skip blueprint/BUILD.md calls in blueprinter mode; generate copy.md + images.md from source HTML; show design.md + copy.md + images.md panels; pass blueprinter props to VibePromptPanel; add screenshot-attach note; add Unsplash filler checkbox |
 
 #### What Did NOT Change
 

@@ -460,20 +460,25 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
 
 // ─── Blueprinter prompt (design.md + copy.md + user screenshot) ───────────────
 
-export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string): string {
+export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
+
+  const imagesSection = imagesMd
+    ? `\n\n---\n\n## images.md\n\n\`\`\`markdown\n${imagesMd}\n\`\`\``
+    : '';
 
   return `# Rebuild Prompt — ${targetLabel} (Blueprinter mode)
 
-Build a web page from three inputs, each with one job:
+Build a web page from four inputs, each with one job:
 
 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 2. DESIGN SYSTEM — from design.md below. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
 3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
+4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.
 
-Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text.
+Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
-IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md and copy.md cannot convey.
+IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.
 
 ---
 
@@ -489,7 +494,7 @@ ${designMd}
 
 \`\`\`markdown
 ${copyMd}
-\`\`\``;
+\`\`\`${imagesSection}`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTI
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
 import { buildCopyMarkdown } from '../lib/copyExporter';
+import { buildImageMarkdown, type ImageSourceInput } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ interface ExtractionResult {
   outputMode: 'full' | 'single' | 'blueprinter';
   copyMd: string | null;
   copyProvenance: string | null;
+  imagesMd: string | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -256,7 +258,7 @@ function OutputPanel({
 
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
-  outputMode, copyMd, copyProvenance, designMd,
+  outputMode, copyMd, imagesMd, designMd,
 }: {
   buildMd: string | null;
   blueprintJson: string;
@@ -266,14 +268,14 @@ function VibePromptPanel({
   onTargetChange: (t: VibeTarget) => void;
   outputMode: 'full' | 'single' | 'blueprinter';
   copyMd: string | null;
-  copyProvenance: string | null;
+  imagesMd: string | null;
   designMd: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const prompt = outputMode === 'blueprinter' && copyMd && designMd
-    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd)
+    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined)
     : buildVibePrompt(
         vibeTarget,
         { buildMd: buildMd ?? '', blueprintJson, provenance },
@@ -358,6 +360,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
   const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('full');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
+  const [fillUnsplash, setFillUnsplash] = useState(false);
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -564,6 +567,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Blueprinter mode: generate copy.md from the structure source HTML (deterministic, no LLM)
       let copyMd: string | null = null;
       let copyProvenance: string | null = null;
+      let imagesMd: string | null = null;
       if (isBlueprinter) {
         const copyHtml = dual ? structureRawHtml : designRawHtml;
         const copyUrl = dual ? structUrl : designUrl;
@@ -571,6 +575,15 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         if (dual) {
           copyProvenance = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
         }
+
+        // images.md — deterministic DOM parsing, no LLM
+        const imageSources: ImageSourceInput[] = [
+          { rawHtml: designRawHtml, pageUrl: designUrl, label: 'diseño' },
+        ];
+        if (dual) {
+          imageSources.push({ rawHtml: structureRawHtml, pageUrl: structUrl, label: 'copy' });
+        }
+        imagesMd = buildImageMarkdown(imageSources, fillUnsplash);
       }
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target, skipped in Blueprinter mode)
@@ -765,7 +778,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -804,13 +817,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             { key: 'scrape-structure', label: 'Phase 2 — Scrape copy source (URL B)' },
             { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
             { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
-            { key: 'done', label: 'Phase 5 — Extract copy.md (deterministic)' },
+            { key: 'done', label: 'Phase 5 — Extract copy.md + images.md (deterministic)' },
           ]
         : [
             { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
             { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
             { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
-            { key: 'done', label: 'Phase 4 — Extract copy.md (deterministic)' },
+            { key: 'done', label: 'Phase 4 — Extract copy.md + images.md (deterministic)' },
           ]
       : isDualUrl
         ? [
@@ -845,7 +858,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         <h2 className="text-xl font-bold text-gray-900 mb-1">Design Extractor</h2>
         <p className="text-sm text-gray-500">
           {outputMode === 'blueprinter'
-            ? <>Blueprinter: extrae <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> (estilo) y <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">copy.md</code> (texto). Aporta tú la estructura con un screenshot.</>
+            ? <>Blueprinter: extrae <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> (estilo), <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">copy.md</code> (texto) e <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">images.md</code> (imágenes). Aporta tú la estructura con un screenshot.</>
             : <>Three-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code>, page blueprint JSON, and <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">BUILD.md</code> reconstruction spec.</>
           }
         </p>
@@ -893,6 +906,18 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
           )}
         </div>
+        {outputMode === 'blueprinter' && (
+          <label className="flex items-center space-x-2 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <input
+              type="checkbox"
+              checked={fillUnsplash}
+              onChange={e => setFillUnsplash(e.target.checked)}
+              disabled={isRunning}
+              className="w-4 h-4"
+            />
+            <span className="text-sm text-gray-700">Rellenar huecos con imágenes de Unsplash (genéricas)</span>
+          </label>
+        )}
         {isDualUrl && outputMode !== 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <p className="text-sm font-medium text-gray-700 mb-2">¿De dónde viene el texto de la página?</p>
@@ -964,7 +989,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               disabled={isRunning}
               className="w-4 h-4"
             />
-            <span className="text-sm text-gray-700">Blueprinter (design.md + copy.md)</span>
+            <span className="text-sm text-gray-700">Blueprinter (design.md + copy.md + images.md)</span>
           </label>
         </div>
       </div>
@@ -1218,6 +1243,17 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             />
           )}
 
+          {/* images.md output — only in Blueprinter mode */}
+          {result.outputMode === 'blueprinter' && result.imagesMd && (
+            <OutputPanel
+              title="images.md"
+              icon={<FileText className="w-4 h-4" />}
+              content={result.imagesMd}
+              filename={`${site}-images.md`}
+              downloadMime="text/markdown"
+            />
+          )}
+
           {/* Blueprinter provenance note */}
           {result.outputMode === 'blueprinter' && result.copyProvenance && (
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
@@ -1296,7 +1332,7 @@ ${result.blueprintJson}
               onTargetChange={setVibeTarget}
               outputMode={result.outputMode}
               copyMd={result.copyMd}
-              copyProvenance={result.copyProvenance}
+              imagesMd={result.imagesMd}
               designMd={result.designMd}
             />
           )}
