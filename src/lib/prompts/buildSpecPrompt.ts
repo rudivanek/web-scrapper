@@ -4,11 +4,12 @@ const BUILD_HEADER = `> Generated from an automated extraction. Values marked AS
 
 const CORE_FRAMING = `You are writing BUILD.md — a complete specification an AI website builder will execute to reproduce this page. Unlike design.md, this document must contain NO unresolved values. Every token needs a concrete, usable value.
 
-For each value marked NOT FOUND in design.md, supply a sensible default that is visually consistent with the screenshot and with the values that WERE extracted — and mark it, using exactly this format:
+BUILD.md is the CLEAN BUILD SPEC. design.md is the HONEST AUDIT. The difference:
+- design.md keeps NOT FOUND, CONFIRMED ABSENT, and audit-style warnings — that is its job.
+- BUILD.md must NEVER contain NOT FOUND, CONFIRMED ABSENT, or audit-style warnings in its token blocks or component specs. It reads as a clean, confident, buildable design system.
+- ASSUMED markers must appear ONLY in the consolidated "Assumptions to verify" section at the end of the document — NOT scattered through the token tables, :root block, or component specs. In the token blocks themselves, every value is presented as a clean, final value with no inline comment.
 
-  border-radius: 9999px; /* ASSUMED — pill shape visible in screenshot, exact value not in CSS */
-
-Values traced to real CSS carry no comment. A reader must be able to tell them apart instantly.
+For each value marked NOT FOUND in design.md, supply a sensible default that is visually consistent with the screenshot and with the values that WERE extracted. Do NOT mark these inline in the token blocks — just use the value. The consolidated Assumptions section at the end will list them all.
 
 Derive assumptions in this order:
   1. Visual evidence from the screenshot
@@ -16,7 +17,7 @@ Derive assumptions in this order:
   3. Common conventions for the detected platform
 Never derive from brand name, industry, or aesthetic taste.
 
-Selectors scoped to a page or template other than the one being analysed must not be applied to this page's sections. Watch for template prefixes such as .p.sei, .p.in, #_404, #lo, ._i-w — these belong to other views. If a section's colour or size is unknown, mark it ASSUMED — never borrow a value from a different template scope and present it as confirmed. Only compute contrast pairings for colours that ACTUALLY OCCUR TOGETHER on this page; if two colours come from selectors in different template scopes, omit the pairing entirely rather than reporting a false accessibility failure.
+Selectors scoped to a page or template other than the one being analysed must not be applied to this page's sections. Watch for template prefixes such as .p.sei, .p.in, #_404, #lo, ._i-w — these belong to other views. If a section's colour or size is unknown, supply an ASSUMED value — never borrow a value from a different template scope and present it as confirmed. Only compute contrast pairings for colours that ACTUALLY OCCUR TOGETHER on this page; if two colours come from selectors in different template scopes, omit the pairing entirely rather than reporting a false accessibility failure.
 
 Values already marked CONFIRMED ABSENT in design.md are NOT assumptions — carry them through as real values with no ASSUMED marker.
 
@@ -55,35 +56,79 @@ Produce these sections in order, starting immediately with "### 1. Overview" (no
   - Custom/licensed: state clearly that the font is custom or licensed and cannot be loaded from a CDN, and provide the best Google Fonts fallback
 - Never leave a font loading method ambiguous
 
-### 3. tailwind.config.js Theme Extension
-Provide a fully populated, valid JS object for the Tailwind theme extension:
-\`\`\`js
-module.exports = {
-  theme: {
-    extend: {
-      colors: { /* all color tokens with hex values */ },
-      fontFamily: { /* heading and body font stacks */ },
-      fontSize: { /* all type scale entries */ },
-      spacing: { /* all spacing tokens */ },
-      borderRadius: { /* all radius tokens */ },
-      screens: { /* actual breakpoints from design.md, NOT remapped to Tailwind defaults */ },
-    }
-  }
+### 3. Design System — Tailwind v4 @theme Block
+
+This project uses **Tailwind CSS v4**. Emit the design system as a Tailwind v4 \`@theme\` block — this is the v4-native way to define design tokens and replaces the v3 \`tailwind.config.js theme.extend\` approach.
+
+Provide a fully populated, valid \`@theme\` block using Tailwind v4 CSS syntax:
+\`\`\`css
+@theme {
+  /* Colors — semantic names by purpose, not scale position */
+  --color-electric-blue-cta: #XXXXXX;
+  --color-nav-bg: #XXXXXX;
+  --color-body-text: #XXXXXX;
+  --color-heading-text: #XXXXXX;
+  --color-card-bg: #XXXXXX;
+  --color-border-subtle: #XXXXXX;
+
+  /* Fonts */
+  --font-heading: 'FontName', fallback;
+  --font-body: 'FontName', fallback;
+
+  /* Type scale */
+  --text-display: 48px;
+  --text-h1: 38px;
+  --text-h2: 28px;
+  --text-body: 16px;
+
+  /* Spacing — semantic names */
+  --spacing-nav-v-pad: 16px;
+  --spacing-section-v: 80px;
+  --spacing-card-pad: 24px;
+  --spacing-container-x: 32px;
+
+  /* Radius */
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --radius-pill: 9999px;
+
+  /* Breakpoints — actual values from design.md */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
 }
 \`\`\`
-- Use the actual breakpoint values found in design.md as the \`screens\` config. Do not remap them onto Tailwind defaults.
-- If the site is desktop-first (max-width media queries), say so explicitly and provide the screens config that matches.
-- Every value must be concrete. Replace NOT FOUND with ASSUMED defaults marked with comments.
 
-### 4. Global CSS
-A valid :root block with every token resolved to a concrete value. No NOT FOUND. No commented-out tokens. ASSUMED values are marked with inline comments.
+**SEMANTIC TOKEN NAMING — critical:**
+Name every token by WHERE IT IS USED (its semantic purpose), not by its scale position. Derive the name from the selector or component where the value appears in the CSS:
+- \`--color-electric-blue-cta\` (not \`--color-primary\`) — the blue used on CTA buttons
+- \`--color-nav-bg\` (not \`--color-gray-900\`) — the nav background color
+- \`--spacing-nav-v-pad\` (not \`--spacing-3\`) — vertical padding inside the nav
+- \`--spacing-section-v\` (not \`--spacing-10\`) — vertical padding between sections
+- \`--radius-button\` (not \`--radius-md\`) — border radius on buttons
+
+Keep a scale name (e.g. \`--color-gray-50\`) ONLY when there is no clear semantic role — i.e. the value is part of a neutral ramp used in many interchangeable places. When a color or spacing value has a clear, specific use, name it after that use.
+
+- Use the actual breakpoint values found in design.md. Do not remap them onto Tailwind defaults.
+- If the site is desktop-first (max-width media queries), say so explicitly.
+- Every value must be concrete — no NOT FOUND, no commented-out tokens.
+- Note at the top of this section: "This is Tailwind v4 @theme syntax. In v4, the @theme block in your main CSS file replaces tailwind.config.js theme.extend."
+
+### 4. Global CSS (:root block)
+A valid \`:root\` block with every token resolved to a concrete value. This is the CSS custom property layer that the @theme block above maps to.
+
+Use the SAME semantic names as in the @theme block. No NOT FOUND. No commented-out tokens. No inline ASSUMED comments — present every value as a clean, final value. The consolidated Assumptions section at the end of the document will list which values were assumed.
 
 ## RULES
 - Do not emit the fixed header.
 - Do not emit sections 5, 6, or 7.
 - Reproduce all visible text VERBATIM from blueprint.json text_blocks where referenced. Do not summarise, translate, shorten, or improve.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
-- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
+- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
+- Do NOT scatter ASSUMED inline comments through the token blocks, @theme block, :root block, or component specs. Present every value as a clean, final value. The consolidated Assumptions section at the end will list every assumed value with its reason.
+- Do NOT include NOT FOUND, CONFIRMED ABSENT, or audit-style warnings in any token block or component spec. BUILD.md is the clean build spec — it reads as a confident, buildable design system. design.md is the honest audit; BUILD.md is not.
+- Use semantic token names (by purpose/usage) throughout — in the @theme block, :root block, and component specs. Keep scale names only when no semantic role exists.
 - If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_SECTIONS_PROMPT = `${CORE_FRAMING}
@@ -119,7 +164,10 @@ For each section in page order, provide:
 - Respect every layout_contract must_preserve and do_not_do rule from blueprint.json.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
 - Use the exact section_index values from blueprint.json in your headings, formatted as '### Section N — Name'. Do not renumber, do not add a 'Section 0', and do not introduce sections that are not in blueprint.json. Navigation and footer are documented under Component Specs in section 6, not as page sections.
-- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. Mark assumptions inline with /* ASSUMED — reason */ only. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
+- You must NOT write a section titled 'Assumptions to Verify', 'Assumptions to verify', or any variant. The consolidated table is written exclusively by the final components call. If you write one, the document is malformed.
+- Do NOT scatter ASSUMED inline comments through the section specs. Present every value as a clean, final value. The consolidated Assumptions section at the end will list every assumed value with its reason.
+- Do NOT include NOT FOUND, CONFIRMED ABSENT, or audit-style warnings in any section spec. BUILD.md is the clean build spec.
+- Use the same semantic token names established in sections 1–4 when referencing colors, spacing, or radius values.
 - If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export const BUILD_SPEC_COMPONENTS_PROMPT = `${CORE_FRAMING}
@@ -141,8 +189,10 @@ Produce these sections in order, starting immediately with "### 6. Component Spe
 ### 6. Component Specs
 For each component (buttons, cards, nav, footer, forms, links):
 - Every CSS property filled with a concrete value
-- All interactive states (:hover, :focus, :focus-visible, :active, :disabled) — if design.md said CONFIRMED ABSENT, carry that through as a real finding, not an assumption
-- ASSUMED values marked with inline comments
+- All interactive states (:hover, :focus, :focus-visible, :active, :disabled) — if design.md said CONFIRMED ABSENT, carry that through as a real value with no ASSUMED marker and no warning text. BUILD.md presents it as a clean spec, not an audit finding.
+- Present every value as a clean, final value — no inline ASSUMED comments in the component specs. The consolidated Assumptions section (7) will list every assumed value.
+- Do NOT include NOT FOUND, CONFIRMED ABSENT, or audit-style warnings in the component specs. BUILD.md is the clean build spec — it reads as a confident, buildable design system.
+- Use the same semantic token names established in sections 1–4 when referencing colors, spacing, or radius values.
 
 ### 7. Assumptions to Verify
 A consolidated list of every ASSUMED value that appears anywhere in sections 1–7 of this document, with its reason and the section it appears in:
@@ -155,9 +205,11 @@ This section is MANDATORY. If you cannot find any ASSUMED values in the provided
 ## RULES
 - Do not emit the fixed header.
 - Do not emit sections 1–5.
-- Scan the provided sections 1–5 for every ASSUMED comment and include each one in the Assumptions table.
+- Scan the provided sections 1–5 for every ASSUMED value (values that were not found in CSS but were supplied as defaults) and include each one in the Assumptions table. Since sections 1–5 no longer scatter inline ASSUMED comments, you must identify assumed values by comparing the token values against design.md's NOT FOUND entries — any token that was NOT FOUND in design.md but has a concrete value in BUILD.md is an assumption.
 - Do not redesign or improve anything. This is a faithful reproduction spec.
 - If design.md contains a Contraste de color section with failures, reproduce those findings in the Component Specs so the builder is aware of accessibility issues.
+- Do NOT include NOT FOUND, CONFIRMED ABSENT, or audit-style warnings in the component specs. BUILD.md is the clean build spec.
+- Use the same semantic token names established in sections 1–4 when referencing colors, spacing, or radius values.
 - If the supplied design.md contains a warning that its tokens do not represent the site's real design system, repeat that warning verbatim at the top of your output. Do not build a confident specification on unreliable input.`;
 
 export function buildFoundationUserPrompt(designMd: string, blueprintJson?: string): string {

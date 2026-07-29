@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.7 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.8 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1797,6 +1797,71 @@ Switching the target platform regenerates the prompt instantly — no re-scrape 
 |---|---|
 | `src/lib/vibePrompt.ts` | New — `buildVibePrompt()` function, `VIBE_TARGETS` list, regex helpers for extracting colors/fonts/images/sections/contracts from BUILD.md and blueprint.json |
 | `src/components/DesignExtractor.tsx` | Modified — imports `buildVibePrompt` and `VIBE_TARGETS`, adds `vibeTarget` state, adds `VibePromptPanel` sub-component, renders panel in results area |
+
+---
+
+### BUILD.md Polish — Semantic Tokens, Tailwind v4 @theme, Clean LLM Output (2026-07-29)
+
+**Updated:** 2026-07-29 — The BUILD.md generation prompts (`buildSpecPrompt.ts`) were overhauled to produce cleaner, more buildable output, matching the polish of dedicated extractors — without weakening design.md's audit honesty.
+
+#### 1. Semantic Token Names
+
+In BUILD.md's `:root` and `@theme` blocks, tokens are now named by PURPOSE (where the value is used), not by scale position:
+
+- `--color-electric-blue-cta` (not `--color-primary`) — the blue used on CTA buttons
+- `--color-nav-bg` (not `--color-gray-900`) — the nav background color
+- `--spacing-nav-v-pad` (not `--spacing-3`) — vertical padding inside the nav
+- `--spacing-section-v` (not `--spacing-10`) — vertical padding between sections
+- `--radius-button` (not `--radius-md`) — border radius on buttons
+
+The name is derived from the selector or component where the value appears in the CSS. A scale name (e.g. `--color-gray-50`) is kept ONLY when there is no clear semantic role — i.e. the value is part of a neutral ramp used in many interchangeable places.
+
+**design.md is unaffected** — it keeps its current naming. This applies to BUILD.md only.
+
+#### 2. Tailwind v4 @theme Output
+
+When the build target is React/Tailwind, the design system is now emitted as a Tailwind v4 `@theme { }` block instead of (or in addition to) the v3 `tailwind.config.js theme.extend` approach. Tailwind v4 is assumed by default.
+
+The `@theme` block uses v4-native CSS syntax:
+```css
+@theme {
+  --color-electric-blue-cta: #XXXXXX;
+  --font-heading: 'FontName', fallback;
+  --text-h1: 38px;
+  --spacing-nav-v-pad: 16px;
+  --radius-button: 8px;
+  --breakpoint-md: 768px;
+}
+```
+
+A note at the top of the section states: "This is Tailwind v4 @theme syntax. In v4, the @theme block in your main CSS file replaces tailwind.config.js theme.extend."
+
+#### 3. Clean LLM-Facing Output (BUILD.md vs design.md)
+
+The difference between the two documents is now explicitly enforced in the prompts:
+
+| Aspect | design.md (Honest Audit) | BUILD.md (Clean Build Spec) |
+|---|---|---|
+| NOT FOUND | Kept — it's the audit's job | NEVER appears — supply a concrete value instead |
+| CONFIRMED ABSENT | Kept — real audit finding | Carried through as a clean value, no warning text |
+| Audit-style warnings | Kept | Suppressed from token blocks and component specs |
+| ASSUMED markers | Inline where needed | ONLY in the consolidated "Assumptions to verify" section at the end — never scattered through token tables, @theme block, :root block, or component specs |
+
+BUILD.md now reads as a clean, confident, buildable design system. Every value in the token blocks, @theme block, :root block, and component specs is presented as a final value with no inline comments. The consolidated "Assumptions to verify" section (section 7) lists every assumed value with its reason and the section it appears in.
+
+The components prompt (section 7) was updated to identify assumed values by comparing BUILD.md's token values against design.md's NOT FOUND entries — since inline ASSUMED comments are no longer scattered through sections 1–5, the comparison logic replaces the old "scan for inline ASSUMED markers" approach.
+
+#### Files Changed
+
+| File | Changes |
+|---|---|
+| `src/lib/prompts/buildSpecPrompt.ts` | `CORE_FRAMING` rewritten to enforce BUILD.md vs design.md distinction; section 3 replaced with Tailwind v4 @theme block + semantic naming rules; section 4 updated to reference @theme; all three prompt sections (foundation, sections, components) updated with rules suppressing NOT FOUND/CONFIRMED ABSENT/audit warnings and requiring semantic token names |
+
+#### What Did NOT Change
+
+- `designExtractionPrompts.ts` (design.md generation) — completely untouched. design.md keeps NOT FOUND, CONFIRMED ABSENT, and all audit-style warnings.
+- The three-call pipeline structure (foundation → sections → components) — unchanged.
+- The fixed header, user prompt builders, and DesignExtractor.tsx flow — unchanged.
 
 ---
 
