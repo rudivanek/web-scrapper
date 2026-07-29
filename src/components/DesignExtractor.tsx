@@ -13,7 +13,7 @@ import {
 import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
-import { buildCopyMarkdown } from '../lib/copyExporter';
+import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 
@@ -258,7 +258,7 @@ function OutputPanel({
 
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
-  outputMode, copyMd, imagesMd, designMd,
+  outputMode, copyMd, imagesMd, designMd, copyMode,
 }: {
   buildMd: string | null;
   blueprintJson: string;
@@ -270,12 +270,13 @@ function VibePromptPanel({
   copyMd: string | null;
   imagesMd: string | null;
   designMd: string;
+  copyMode: 'scrape' | 'lorem';
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const prompt = outputMode === 'blueprinter' && copyMd && designMd
-    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined)
+    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem')
     : buildVibePrompt(
         vibeTarget,
         { buildMd: buildMd ?? '', blueprintJson, provenance },
@@ -362,6 +363,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
+  const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -570,11 +572,18 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       let copyProvenance: string | null = null;
       let imagesMd: string | null = null;
       if (isBlueprinter) {
-        const copyHtml = dual ? structureRawHtml : designRawHtml;
-        const copyUrl = dual ? structUrl : designUrl;
-        copyMd = buildCopyMarkdown(copyHtml, copyUrl);
-        if (dual) {
-          copyProvenance = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
+        if (copyMode === 'lorem') {
+          const loremHtml = dual ? structureRawHtml : designRawHtml;
+          const loremUrl = dual ? structUrl : designUrl;
+          copyMd = buildCopyMarkdownLorem(loremHtml, loremUrl);
+          copyProvenance = `Texto de relleno (Lorem Ipsum) basado en la estructura de ${loremUrl}.`;
+        } else {
+          const copyHtml = dual ? structureRawHtml : designRawHtml;
+          const copyUrl = dual ? structUrl : designUrl;
+          copyMd = buildCopyMarkdown(copyHtml, copyUrl);
+          if (dual) {
+            copyProvenance = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
+          }
         }
 
         // images.md — deterministic DOM parsing, no LLM
@@ -901,14 +910,45 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             value={structureUrl}
             onChange={e => setStructureUrl(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
-            placeholder={outputMode === 'blueprinter' ? 'De dónde extraer el texto. Vacío = usar la URL de diseño.' : 'Déjalo vacío para usar la misma URL para todo'}
-            disabled={isRunning}
+            placeholder={outputMode === 'blueprinter' ? (copyMode === 'lorem' ? 'Solo se usa para imágenes si el origen de imágenes es "copy"' : 'De dónde extraer el texto. Vacío = usar la URL de diseño.') : 'Déjalo vacío para usar la misma URL para todo'}
+            disabled={isRunning || (outputMode === 'blueprinter' && copyMode === 'lorem' && imageSource !== 'copy')}
             className="w-full border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
           />
           {structureUrlError && (
             <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
           )}
         </div>
+        {outputMode === 'blueprinter' && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+            <p className="text-sm font-medium text-gray-700">¿De dónde viene el texto?</p>
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="copyMode"
+                  value="scrape"
+                  checked={copyMode === 'scrape'}
+                  onChange={() => setCopyMode('scrape')}
+                  disabled={isRunning}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm text-gray-700">De la URL de texto/copy — por defecto</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="copyMode"
+                  value="lorem"
+                  checked={copyMode === 'lorem'}
+                  onChange={() => setCopyMode('lorem')}
+                  disabled={isRunning}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm text-gray-700">Lorem Ipsum (texto de relleno)</span>
+              </label>
+            </div>
+          </div>
+        )}
         {outputMode === 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
             <p className="text-sm font-medium text-gray-700">¿De dónde tomar las imágenes?</p>
@@ -1385,6 +1425,7 @@ ${result.blueprintJson}
               copyMd={result.copyMd}
               imagesMd={result.imagesMd}
               designMd={result.designMd}
+              copyMode={copyMode}
             />
           )}
         </div>

@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.13 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.14 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1855,6 +1855,44 @@ A new file `src/lib/copyExporter.ts` exports `buildCopyMarkdown(rawHtml, pageUrl
 - **Navigation and footer** separated into "## Navigation" and "## Footer" sections at the end — available but not mixed into body copy
 - **Original language preserved verbatim** — never translated, summarised, rewritten, or improved
 - **File header:** "# Copy — {pageUrl}\nTodo el texto visible de la página, en orden. Úsalo tal cual; no lo reescribas."
+
+#### Copy Source Selector (Blueprinter mode)
+
+A radio-button selector appears in Blueprinter mode: "¿De dónde viene el texto?"
+
+- **(•) De la URL de texto/copy — por defecto** — scrapes real copy from the chosen URL (default behavior, unchanged)
+- **( ) Lorem Ipsum (texto de relleno)** — generates Lorem Ipsum placeholder text sized per element to render the layout realistically
+
+Stored as `copyMode: 'scrape' | 'lorem'`. Default: `'scrape'`.
+
+When 'lorem' is selected, the URL DE TEXTO/COPY field becomes irrelevant for copy and is greyed out (unless the image source is set to 'copy', in which case it stays enabled for image extraction). The copy and image source selectors are fully independent.
+
+#### Lorem Ipsum Generation (src/lib/copyExporter.ts — buildCopyMarkdownLorem)
+
+When `copyMode === 'lorem'`, the page DOM is still parsed for STRUCTURE — the same DOM walk as real copy extraction, but each element's text is replaced with Lorem Ipsum sized to its role:
+
+- h1 → 3–6 Lorem words
+- h2 → 3–8 Lorem words
+- h3–h6 → 2–5 Lorem words
+- paragraph → 1–3 Lorem sentences (matched to original length band: short original → 1 sentence, long → 3)
+- list item → 2–4 Lorem words
+- button label → 1–2 Lorem words (Title Case)
+- quote → 1 Lorem sentence
+
+The section grouping and order are preserved exactly as real copy.md would — same `## Section` headings, same document order. Only the words change.
+
+The generator matches the original's LENGTH per block where possible: it reads the original text length, generates Lorem to match the length band, then discards the original text. This ensures the placeholder page has realistic proportions (a long intro paragraph stays long, a short caption stays short).
+
+Uses classic Lorem Ipsum vocabulary. Deterministic-ish (seeded by page URL hash) so re-running the same page gives stable output.
+
+copy.md header in lorem mode:
+```
+# Copy — TEXTO DE RELLENO (Lorem Ipsum)
+Este texto es de relleno, NO es contenido real. Reemplázalo con copy definitivo antes de publicar. La estructura y longitud imitan una página real.
+```
+
+In the builder prompt (vibe panel), when copyMode is lorem, an additional warning is added:
+> The copy is Lorem Ipsum placeholder — use it to render the layout, but it is NOT real content. Do not treat it as meaningful text.
 
 #### Image Source Selector (Blueprinter mode)
 

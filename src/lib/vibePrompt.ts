@@ -460,11 +460,15 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
 
 // ─── Blueprinter prompt (design.md + copy.md + user screenshot) ───────────────
 
-export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string): string {
+export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
 
   const imagesSection = imagesMd
     ? `\n\n---\n\n## images.md\n\n\`\`\`markdown\n${imagesMd}\n\`\`\``
+    : '';
+
+  const loremWarning = isLorem
+    ? '\n\nIMPORTANT: The copy is Lorem Ipsum placeholder — use it to render the layout, but it is NOT real content. Do not treat it as meaningful text.'
     : '';
 
   return `# Rebuild Prompt — ${targetLabel} (Blueprinter mode)
@@ -478,7 +482,7 @@ Build a web page from four inputs, each with one job:
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
-IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.
+IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${loremWarning}
 
 ---
 

@@ -254,3 +254,261 @@ export function buildCopyMarkdown(rawHtml: string, pageUrl: string): string {
 
   return parts.join('\n');
 }
+
+// ─── Lorem Ipsum mode ──────────────────────────────────────────────────────────
+
+const LOREM_WORDS = [
+  'lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit',
+  'sed', 'do', 'eiusmod', 'tempor', 'incididunt', 'ut', 'labore', 'et', 'dolore',
+  'magna', 'aliqua', 'enim', 'ad', 'minim', 'veniam', 'quis', 'nostrud',
+  'exercitation', 'ullamco', 'laboris', 'nisi', 'aliquip', 'ex', 'ea', 'commodo',
+  'consequat', 'duis', 'aute', 'irure', 'in', 'reprehenderit', 'voluptate',
+  'velit', 'esse', 'cillum', 'fugiat', 'nulla', 'pariatur', 'excepteur', 'sint',
+  'occaecat', 'cupidatat', 'non', 'proident', 'sunt', 'culpa', 'qui', 'officia',
+  'deserunt', 'mollit', 'anim', 'id', 'est', 'laborum', 'vivamus', 'vestibulum',
+  'sapien', 'euismod', 'praesent', 'vitae', 'luctus', 'metus', 'aenean',
+  'ultricies', 'purus', 'quam', 'cras', 'auctor', 'integer', 'feugiat',
+  'placerat', 'nibh', 'phasellus', 'suspendisse', 'potenti', 'donec',
+  'mauris', 'posuere', 'imperdiet', 'curabitur', 'natoque', 'penatibus',
+];
+
+const LOREM_SENTENCES = [
+  'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+  'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+  'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
+  'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.',
+  'Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.',
+  'Vivamus vestibulum sapien euismod praesent vitae luctus metus aenean ultricies purus quam.',
+  'Cras auctor integer feugiat placerat nibh phasellus suspendisse potenti.',
+  'Donec mauris posuere imperdiet curabitur natoque penatibus et magnis dis parturient montes.',
+];
+
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    return state / 4294967296;
+  };
+}
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h) || 1;
+}
+
+function pickWords(rng: () => number, count: number): string {
+  const words: string[] = [];
+  for (let i = 0; i < count; i++) {
+    words.push(LOREM_WORDS[Math.floor(rng() * LOREM_WORDS.length)]);
+  }
+  return words.join(' ');
+}
+
+function titleCase(s: string): string {
+  return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function generateLoremForElement(el: Element, originalText: string, rng: () => number): string | null {
+  const tag = el.tagName.toLowerCase();
+  const wordCount = originalText.split(/\s+/).filter(Boolean).length;
+
+  if (tag === 'h1') {
+    return `${'#'.repeat(1)} ${pickWords(rng, 3 + Math.floor(rng() * 4))}`;
+  }
+  if (tag === 'h2') {
+    return `${'#'.repeat(2)} ${pickWords(rng, 3 + Math.floor(rng() * 6))}`;
+  }
+  if (HEADING_TAGS.has(tag)) {
+    const level = parseInt(tag[1]);
+    return `${'#'.repeat(level)} ${pickWords(rng, 2 + Math.floor(rng() * 4))}`;
+  }
+  if (isButtonLike(el)) {
+    const label = titleCase(pickWords(rng, 1 + Math.floor(rng() * 2)));
+    return `Button: ${label}`;
+  }
+  if (tag === 'p') {
+    let sentences: number;
+    if (wordCount <= 10) sentences = 1;
+    else if (wordCount <= 30) sentences = 2;
+    else sentences = 3;
+    const parts: string[] = [];
+    for (let i = 0; i < sentences; i++) {
+      parts.push(LOREM_SENTENCES[Math.floor(rng() * LOREM_SENTENCES.length)]);
+    }
+    return parts.join(' ');
+  }
+  if (tag === 'li') {
+    return `- ${pickWords(rng, 2 + Math.floor(rng() * 3))}`;
+  }
+  if (tag === 'blockquote') {
+    return `> ${LOREM_SENTENCES[Math.floor(rng() * LOREM_SENTENCES.length)]}`;
+  }
+  return null;
+}
+
+export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(rawHtml, 'text/html');
+  const body = doc.body;
+
+  const header = `# Copy — TEXTO DE RELLENO (Lorem Ipsum)\nEste texto es de relleno, NO es contenido real. Reemplázalo con copy definitivo antes de publicar. La estructura y longitud imitan una página real.`;
+
+  if (!body || !rawHtml.trim()) {
+    return `${header}\n\n(No se pudo extraer la estructura de la página.)`;
+  }
+
+  const seed = hashString(pageUrl);
+  const rng = seededRandom(seed);
+
+  interface TextItem {
+    text: string;
+    section: Element | null;
+    isNav: boolean;
+    isFooter: boolean;
+  }
+
+  const items: TextItem[] = [];
+  const seenSections = new Map<Element, number>();
+  let sectionOrder = 0;
+
+  function getAncestorInfo(el: Element): { section: Element | null; isNav: boolean; isFooter: boolean } {
+    let section: Element | null = null;
+    let isNav = false;
+    let isFooter = false;
+    let node: Element | null = el.parentElement;
+    while (node && node !== body) {
+      const tag = node.tagName.toLowerCase();
+      if (!section && SECTION_TAGS.has(tag)) section = node;
+      if (NAV_TAGS.has(tag)) isNav = true;
+      if (FOOTER_TAGS.has(tag)) isFooter = true;
+      node = node.parentElement;
+    }
+    return { section, isNav, isFooter };
+  }
+
+  function walk(el: Element) {
+    if (shouldSkipElement(el)) return;
+    const tag = el.tagName.toLowerCase();
+    if (NAV_TAGS.has(tag) || FOOTER_TAGS.has(tag)) return;
+
+    const originalText = getVisibleText(el);
+    if (originalText) {
+      const lorem = generateLoremForElement(el, originalText, rng);
+      if (lorem) {
+        const info = getAncestorInfo(el);
+        items.push({ text: lorem, section: info.section, isNav: info.isNav, isFooter: info.isFooter });
+        if (info.section && !seenSections.has(info.section)) {
+          seenSections.set(info.section, sectionOrder++);
+        }
+        if (HEADING_TAGS.has(tag) || tag === 'p' || tag === 'li' || tag === 'blockquote' || isButtonLike(el)) {
+          return;
+        }
+      }
+    }
+
+    if (originalText) {
+      const direct = getDirectText(el);
+      if (direct) {
+        const lorem = pickWords(rng, 2 + Math.floor(rng() * 4));
+        const info = getAncestorInfo(el);
+        items.push({ text: lorem, section: info.section, isNav: info.isNav, isFooter: info.isFooter });
+        if (info.section && !seenSections.has(info.section)) {
+          seenSections.set(info.section, sectionOrder++);
+        }
+      }
+    }
+
+    for (const child of Array.from(el.children)) {
+      walk(child);
+    }
+  }
+
+  walk(body);
+
+  const navLines: string[] = [];
+  const footerLines: string[] = [];
+  for (const nav of body.querySelectorAll('nav')) {
+    if (shouldSkipElement(nav)) continue;
+    for (const el of nav.querySelectorAll('a, button, [role="button"]')) {
+      const text = getVisibleText(el);
+      if (text) {
+        const lorem = isButtonLike(el) ? titleCase(pickWords(rng, 1 + Math.floor(rng() * 2))) : pickWords(rng, 1 + Math.floor(rng() * 2));
+        navLines.push(lorem);
+      }
+    }
+  }
+  for (const footer of body.querySelectorAll('footer')) {
+    if (shouldSkipElement(footer)) continue;
+    for (const el of footer.querySelectorAll('a, button, p, li, h1, h2, h3, h4, h5, h6')) {
+      const text = getVisibleText(el);
+      if (text) {
+        const lorem = generateLoremForElement(el, text, rng);
+        if (lorem) footerLines.push(lorem);
+      }
+    }
+  }
+
+  const sectionGroups = new Map<Element, string[]>();
+  const orphanLines: string[] = [];
+  for (const item of items) {
+    if (item.isNav || item.isFooter) continue;
+    if (item.section) {
+      if (!sectionGroups.has(item.section)) {
+        sectionGroups.set(item.section, []);
+      }
+      sectionGroups.get(item.section)!.push(item.text);
+    } else {
+      orphanLines.push(item.text);
+    }
+  }
+
+  const parts: string[] = [header, ''];
+  const sortedSections = Array.from(seenSections.entries())
+    .sort((a, b) => a[1] - b[1])
+    .map(e => e[0]);
+
+  if (sortedSections.length > 0) {
+    let idx = 0;
+    for (const sec of sortedSections) {
+      const lines = sectionGroups.get(sec);
+      if (!lines || lines.length === 0) continue;
+      idx++;
+      const label = getSectionLabel(sec, idx);
+      parts.push(`## ${label}`);
+      parts.push('');
+      parts.push(...lines);
+      parts.push('');
+    }
+  }
+
+  if (orphanLines.length > 0) {
+    if (sortedSections.length > 0) {
+      parts.push('## Other');
+      parts.push('');
+    }
+    parts.push(...orphanLines);
+    parts.push('');
+  }
+
+  if (navLines.length > 0) {
+    parts.push('## Navigation');
+    parts.push('');
+    parts.push(...navLines);
+    parts.push('');
+  }
+
+  if (footerLines.length > 0) {
+    parts.push('## Footer');
+    parts.push('');
+    parts.push(...footerLines);
+    parts.push('');
+  }
+
+  return parts.join('\n');
+}
+
+
+export { buildCopyMarkdown, buildCopyMarkdownLorem }
