@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.9 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.10 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1827,6 +1827,10 @@ copy.md may be sourced from a different URL than design.md, reusing the existing
 - If the structure/copy URL is filled, copy.md is extracted from THAT url.
 - If empty, copy.md is extracted from the design url.
 - Provenance shown as "Diseño: {A}. Texto: {B}." when the two URLs differ.
+
+In Blueprinter mode the second URL field is relabelled "URL de texto/copy (opcional)" with helper text "De dónde extraer el texto. Vacío = usar la URL de diseño." The "¿De dónde viene el texto?" radio group is hidden entirely in this mode — the field IS the copy source, so the distinction is redundant. In 'full' and 'single' modes the original label "URL de estructura (opcional)" and radio group remain unchanged.
+
+The header description is also mode-aware: Blueprinter mode shows "Blueprinter: extrae design.md (estilo) y copy.md (texto). Aporta tú la estructura con un screenshot." instead of the default three-phase pipeline description.
 
 #### copy.md Format (src/lib/copyExporter.ts)
 

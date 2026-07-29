@@ -828,7 +828,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       <div className="mb-8">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Design Extractor</h2>
         <p className="text-sm text-gray-500">
-          Three-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code>, page blueprint JSON, and <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">BUILD.md</code> reconstruction spec.
+          {outputMode === 'blueprinter'
+            ? <>Blueprinter: extrae <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> (estilo) y <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">copy.md</code> (texto). Aporta tú la estructura con un screenshot.</>
+            : <>Three-phase pipeline: Firecrawl scrapes page structure and screenshot, then Claude generates a complete <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code>, page blueprint JSON, and <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">BUILD.md</code> reconstruction spec.</>
+          }
         </p>
       </div>
 
@@ -860,13 +863,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">URL de estructura (opcional)</label>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{outputMode === 'blueprinter' ? 'URL de texto/copy (opcional)' : 'URL de estructura (opcional)'}</label>
           <input
             type="text"
             value={structureUrl}
             onChange={e => setStructureUrl(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
-            placeholder="Déjalo vacío para usar la misma URL para todo"
+            placeholder={outputMode === 'blueprinter' ? 'De dónde extraer el texto. Vacío = usar la URL de diseño.' : 'Déjalo vacío para usar la misma URL para todo'}
             disabled={isRunning}
             className="w-full border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
           />
@@ -874,7 +877,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
           )}
         </div>
-        {isDualUrl && (
+        {isDualUrl && outputMode !== 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <p className="text-sm font-medium text-gray-700 mb-2">¿De dónde viene el texto de la página?</p>
             <div className="space-y-2">
