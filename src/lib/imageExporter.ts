@@ -1,9 +1,10 @@
 import { extractAssetManifest } from './assetExtractor';
 
+export type ImageSourceMode = 'design' | 'copy' | 'unsplash';
+
 export interface ImageSourceInput {
   rawHtml: string;
   pageUrl: string;
-  label: 'diseño' | 'copy';
 }
 
 interface ImageEntry {
@@ -12,7 +13,6 @@ interface ImageEntry {
   width: number | null;
   height: number | null;
   section: string;
-  source: 'diseño' | 'copy';
   isUnsplash: boolean;
 }
 
@@ -126,33 +126,33 @@ function extractImagesFromSource(source: ImageSourceInput): ImageEntry[] {
     entries.push({
       url: img.url, alt: img.alt, width: img.width, height: img.height,
       section: urlToSection.get(img.url) ?? 'Other',
-      source: source.label, isUnsplash: false,
+      isUnsplash: false,
     });
   }
 
   for (const bgUrl of manifest.background_images) {
     entries.push({
       url: bgUrl, alt: '(background image)', width: null, height: null,
-      section: 'Background Images', source: source.label, isUnsplash: false,
+      section: 'Background Images', isUnsplash: false,
     });
   }
 
   if (manifest.global_assets.logo) {
     entries.unshift({
       url: manifest.global_assets.logo, alt: 'logo', width: null, height: null,
-      section: 'Logo', source: source.label, isUnsplash: false,
+      section: 'Logo', isUnsplash: false,
     });
   }
   if (manifest.global_assets.favicon) {
     entries.push({
       url: manifest.global_assets.favicon, alt: 'favicon', width: null, height: null,
-      section: 'Favicon', source: source.label, isUnsplash: false,
+      section: 'Favicon', isUnsplash: false,
     });
   }
   if (manifest.global_assets.og_image) {
     entries.push({
       url: manifest.global_assets.og_image, alt: 'og:image', width: null, height: null,
-      section: 'Open Graph Image', source: source.label, isUnsplash: false,
+      section: 'Open Graph Image', isUnsplash: false,
     });
   }
 
@@ -160,7 +160,7 @@ function extractImagesFromSource(source: ImageSourceInput): ImageEntry[] {
     if (vid.poster) {
       entries.push({
         url: vid.poster, alt: '(video poster)', width: null, height: null,
-        section: 'Videos', source: source.label, isUnsplash: false,
+        section: 'Videos', isUnsplash: false,
       });
     }
   }
@@ -174,23 +174,18 @@ function buildUnsplashUrl(query: string): string {
 }
 
 export function buildImageMarkdown(
-  sources: ImageSourceInput[],
-  fillUnsplash: boolean = false,
+  source: ImageSourceInput | null,
+  imageSource: ImageSourceMode,
+  fillUnsplash: boolean,
 ): string {
   const allEntries: ImageEntry[] = [];
-  const sourceLabels: string[] = [];
-  const allSectionNames: string[] = [];
-  const seenSections = new Set<string>();
+  let allSectionNames: string[] = [];
 
-  for (const source of sources) {
+  if (source && imageSource !== 'unsplash') {
     allEntries.push(...extractImagesFromSource(source));
-    sourceLabels.push(source.label);
-    for (const sec of collectAllSectionNames(source.rawHtml)) {
-      if (!seenSections.has(sec)) {
-        seenSections.add(sec);
-        allSectionNames.push(sec);
-      }
-    }
+    allSectionNames = collectAllSectionNames(source.rawHtml);
+  } else if (source && imageSource === 'unsplash') {
+    allSectionNames = collectAllSectionNames(source.rawHtml);
   }
 
   const sectionOrder: string[] = [];
@@ -208,13 +203,14 @@ export function buildImageMarkdown(
     }
   }
 
-  if (fillUnsplash) {
+  const useUnsplash = fillUnsplash || imageSource === 'unsplash';
+  if (useUnsplash) {
     const sectionsWithImages = new Set(allEntries.map(e => e.section));
     for (const sec of allSectionNames) {
       if (!sectionsWithImages.has(sec) && !SKIP_SECTIONS_FOR_FILLER.has(sec)) {
         allEntries.push({
           url: buildUnsplashUrl(sec), alt: '', width: null, height: null,
-          section: sec, source: 'diseño', isUnsplash: true,
+          section: sec, isUnsplash: true,
         });
       }
     }
@@ -226,8 +222,14 @@ export function buildImageMarkdown(
     sectionGroups.get(entry.section)!.push(entry);
   }
 
-  const sourceStr = [...new Set(sourceLabels)].join(' + ');
-  const header = `# Imágenes — ${sourceStr}\nImágenes reales extraídas de la(s) página(s). Úsalas en las secciones correspondientes. Las marcadas [UNSPLASH] son de relleno genérico, no reales.`;
+  let header: string;
+  if (imageSource === 'unsplash') {
+    header = `# Imágenes de: Unsplash (genéricas)\nTodas las imágenes son de relleno genérico de Unsplash. Reemplázalas con imágenes reales antes de publicar.`;
+  } else if (source) {
+    header = `# Imágenes de: ${source.pageUrl}\nImágenes reales extraídas de la página. Úsalas en las secciones correspondientes.${fillUnsplash ? ' Las marcadas [UNSPLASH] son de relleno genérico, no reales.' : ''}`;
+  } else {
+    header = `# Imágenes\nSin fuente disponible.`;
+  }
 
   const parts: string[] = [header, ''];
   for (const section of sectionOrder) {
@@ -238,9 +240,8 @@ export function buildImageMarkdown(
     for (const entry of group) {
       const dims = entry.width && entry.height ? ` — ${entry.width}×${entry.height}` : '';
       const altStr = entry.alt ? ` — alt: "${entry.alt}"` : '';
-      const sourceTag = ` — (${entry.source})`;
       const unsplashTag = entry.isUnsplash ? ' — [UNSPLASH — relleno genérico, reemplazar]' : '';
-      parts.push(`- ${entry.url}${altStr}${sourceTag}${dims}${unsplashTag}`);
+      parts.push(`- ${entry.url}${altStr}${dims}${unsplashTag}`);
     }
     parts.push('');
   }

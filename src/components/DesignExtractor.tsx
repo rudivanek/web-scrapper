@@ -14,7 +14,7 @@ import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTI
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
 import { buildCopyMarkdown } from '../lib/copyExporter';
-import { buildImageMarkdown, type ImageSourceInput } from '../lib/imageExporter';
+import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -361,6 +361,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('full');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
   const [fillUnsplash, setFillUnsplash] = useState(false);
+  const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -577,13 +578,15 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         }
 
         // images.md — deterministic DOM parsing, no LLM
-        const imageSources: ImageSourceInput[] = [
-          { rawHtml: designRawHtml, pageUrl: designUrl, label: 'diseño' },
-        ];
-        if (dual) {
-          imageSources.push({ rawHtml: structureRawHtml, pageUrl: structUrl, label: 'copy' });
+        let imageInput: ImageSourceInput | null = null;
+        if (imageSource === 'design') {
+          imageInput = { rawHtml: designRawHtml, pageUrl: designUrl };
+        } else if (imageSource === 'copy' && dual) {
+          imageInput = { rawHtml: structureRawHtml, pageUrl: structUrl };
+        } else if (imageSource === 'copy' && !dual) {
+          imageInput = { rawHtml: designRawHtml, pageUrl: designUrl };
         }
-        imagesMd = buildImageMarkdown(imageSources, fillUnsplash);
+        imagesMd = buildImageMarkdown(imageInput, imageSource, fillUnsplash);
       }
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target, skipped in Blueprinter mode)
@@ -907,16 +910,64 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           )}
         </div>
         {outputMode === 'blueprinter' && (
-          <label className="flex items-center space-x-2 cursor-pointer p-3 bg-gray-50 border border-gray-200 rounded-lg">
-            <input
-              type="checkbox"
-              checked={fillUnsplash}
-              onChange={e => setFillUnsplash(e.target.checked)}
-              disabled={isRunning}
-              className="w-4 h-4"
-            />
-            <span className="text-sm text-gray-700">Rellenar huecos con imágenes de Unsplash (genéricas)</span>
-          </label>
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+            <p className="text-sm font-medium text-gray-700">¿De dónde tomar las imágenes?</p>
+            <div className="space-y-2">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="imageSource"
+                  value="design"
+                  checked={imageSource === 'design'}
+                  onChange={() => setImageSource('design')}
+                  disabled={isRunning}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm text-gray-700">De la URL de diseño ({hostname(url)})</span>
+              </label>
+              {structureUrl.trim().length > 0 && (
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="imageSource"
+                    value="copy"
+                    checked={imageSource === 'copy'}
+                    onChange={() => setImageSource('copy')}
+                    disabled={isRunning}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-gray-700">De la URL de texto/copy ({hostname(structureUrl)})</span>
+                </label>
+              )}
+              {fillUnsplash && (
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="imageSource"
+                    value="unsplash"
+                    checked={imageSource === 'unsplash'}
+                    onChange={() => setImageSource('unsplash')}
+                    disabled={isRunning}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm text-gray-700">Solo Unsplash (genéricas)</span>
+                </label>
+              )}
+            </div>
+            <label className="flex items-center space-x-2 cursor-pointer pt-2 border-t border-gray-200">
+              <input
+                type="checkbox"
+                checked={fillUnsplash}
+                onChange={e => {
+                  setFillUnsplash(e.target.checked);
+                  if (!e.target.checked && imageSource === 'unsplash') setImageSource('design');
+                }}
+                disabled={isRunning}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-gray-700">Rellenar huecos con imágenes de Unsplash (genéricas)</span>
+            </label>
+          </div>
         )}
         {isDualUrl && outputMode !== 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">

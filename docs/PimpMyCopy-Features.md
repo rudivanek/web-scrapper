@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.12 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.13 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1856,15 +1856,32 @@ A new file `src/lib/copyExporter.ts` exports `buildCopyMarkdown(rawHtml, pageUrl
 - **Original language preserved verbatim** — never translated, summarised, rewritten, or improved
 - **File header:** "# Copy — {pageUrl}\nTodo el texto visible de la página, en orden. Úsalo tal cual; no lo reescribas."
 
+#### Image Source Selector (Blueprinter mode)
+
+A radio-button selector appears in Blueprinter mode, above the Unsplash checkbox: "¿De dónde tomar las imágenes?"
+
+- **(•) De la URL de diseño ({design domain})** — default
+- **( ) De la URL de texto/copy ({copy domain})** — only shown if the copy/structure URL is filled
+- **( ) Solo Unsplash (genéricas)** — only shown if the Unsplash checkbox is enabled
+
+Stored as `imageSource: 'design' | 'copy' | 'unsplash'`. Default: `'design'`.
+
+images.md extracts ONLY from the selected URL — no more automatic both-sources mixing. If the copy URL is empty, the 'copy' option is hidden and defaults to 'design'.
+
+The Unsplash checkbox still works as a FILLER layer on top of the chosen source: real images from the selected URL first, Unsplash only for leftover slots. If `imageSource` is `'unsplash'`, all images are Unsplash (no real extraction).
+
+Images in images.md are labeled by their single source in the header, e.g. "Imágenes de: https://sharpen.studio". No per-line source tags since there is only one source.
+
 #### images.md Format (src/lib/imageExporter.ts)
 
-A new file `src/lib/imageExporter.ts` exports `buildImageMarkdown(sources, fillUnsplash?) → string`. It performs deterministic DOM parsing (no LLM call) and extracts real image URLs from the scraped page(s):
+A new file `src/lib/imageExporter.ts` exports `buildImageMarkdown(source, imageSource, fillUnsplash) → string`. It performs deterministic DOM parsing (no LLM call) and extracts real image URLs from a single user-chosen source page:
 
 - **Reuses** `extractAssetManifest()` from `src/lib/assetExtractor.ts` — does not rewrite asset extraction logic
-- **Source selection:**
-  - Always extracts from URL DE DISEÑO (labelled `(diseño)`)
-  - Also extracts from URL DE TEXTO/COPY if filled and different (labelled `(copy)`)
-- **Per image:** absolute URL, alt text, width/height if present, nearest section/heading for placement context, source label
+- **Source selection:** extracts from ONE user-chosen URL only (no automatic both-sources mixing)
+  - `imageSource === 'design'` → extracts from URL DE DISEÑO
+  - `imageSource === 'copy'` → extracts from URL DE TEXTO/COPY (if filled)
+  - `imageSource === 'unsplash'` → no real extraction, all images are Unsplash
+- **Per image:** absolute URL, alt text, width/height if present, nearest section/heading for placement context
 - **Filters:** skips tracking pixels, spacers, and images under 32px in both dimensions
 - **Grouped by section** in document order (## Hero, ## Servicios, etc.) with logos, blog thumbnails, and icons under labelled groups
 - **Header:** "# Imágenes — {sources}\nImágenes reales extraídas de la(s) página(s). Úsalas en las secciones correspondientes. Las marcadas [UNSPLASH] son de relleno genérico, no reales."
