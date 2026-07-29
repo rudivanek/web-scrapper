@@ -510,5 +510,4 @@ export function buildCopyMarkdownLorem(rawHtml: string, pageUrl: string): string
   return parts.join('\n');
 }
 
-
 export { buildCopyMarkdown, buildCopyMarkdownLorem }
