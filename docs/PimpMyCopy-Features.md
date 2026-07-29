@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.8 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.9 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1797,6 +1797,78 @@ Switching the target platform regenerates the prompt instantly — no re-scrape 
 |---|---|
 | `src/lib/vibePrompt.ts` | New — `buildVibePrompt()` function, `VIBE_TARGETS` list, regex helpers for extracting colors/fonts/images/sections/contracts from BUILD.md and blueprint.json |
 | `src/components/DesignExtractor.tsx` | Modified — imports `buildVibePrompt` and `VIBE_TARGETS`, adds `vibeTarget` state, adds `VibePromptPanel` sub-component, renders panel in results area |
+
+---
+
+### Blueprinter Output Mode — design.md + copy.md (2026-07-29)
+
+**Added:** 2026-07-29 — A third output mode "Blueprinter" that emits exactly two files: design.md (styling) and copy.md (visible text). No blueprint.json, no BUILD.md. Designed for the workflow where the user supplies their own inspiration screenshot for layout, design.md provides the styling, and copy.md provides the text.
+
+#### Output Mode Toggle
+
+The "Formato de salida" control now has three options:
+1. **Completo** (design.md + blueprint.json + BUILD.md) — default, unchanged
+2. **Un solo archivo** (para otro LLM) — unchanged
+3. **Blueprinter** (design.md + copy.md) — new
+
+Stored as `outputMode = 'full' | 'single' | 'blueprinter'`. The 'full' and 'single' modes behave exactly as before.
+
+#### Blueprinter Pipeline
+
+When `outputMode === 'blueprinter'`:
+- Runs the design pipeline (extract-css + platform detection + design.md) as today. design.md is output unchanged.
+- Runs deterministic copy extraction (no LLM call) to produce copy.md from the rendered rawHtml.
+- Skips blueprint JSON generation and BUILD.md generation entirely — this makes the mode significantly faster.
+- Presents exactly two download cards: design.md and copy.md.
+
+#### Dual URL Support
+
+copy.md may be sourced from a different URL than design.md, reusing the existing optional second URL field:
+- If the structure/copy URL is filled, copy.md is extracted from THAT url.
+- If empty, copy.md is extracted from the design url.
+- Provenance shown as "Diseño: {A}. Texto: {B}." when the two URLs differ.
+
+#### copy.md Format (src/lib/copyExporter.ts)
+
+A new file `src/lib/copyExporter.ts` exports `buildCopyMarkdown(rawHtml, pageUrl) → string`. It performs deterministic DOM parsing (no LLM call) and extracts visible text in document order:
+
+- **Headings** h1–h6 → markdown headings of matching level
+- **Paragraphs** → plain lines
+- **List items** → markdown bullets
+- **Button / a-styled-as-button labels** → labelled as "Button: {text}"
+- **Blockquotes** → markdown quotes
+- **Skips:** script/style/noscript content, empty nodes, pure-icon links, aria-hidden elements, cookie banners
+- **Grouped by section** (nearest section/header ancestor) with "## Section N" headings; falls back to flat ordered list if sections aren't detectable
+- **Navigation and footer** separated into "## Navigation" and "## Footer" sections at the end — available but not mixed into body copy
+- **Original language preserved verbatim** — never translated, summarised, rewritten, or improved
+- **File header:** "# Copy — {pageUrl}\nTodo el texto visible de la página, en orden. Úsalo tal cual; no lo reescribas."
+
+#### Builder Prompt for Blueprinter Mode
+
+In the vibePrompt panel, when `outputMode === 'blueprinter'`, the generated prompt is shaped for the three-input workflow:
+
+> Build a web page from three inputs, each with one job:
+> 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
+> 2. DESIGN SYSTEM — from design.md. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
+> 3. COPY — from copy.md. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
+> Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text.
+
+The panel displays a note reminding the user they must attach their own inspiration screenshot — the app does not supply one in this mode.
+
+#### Files Changed
+
+| File | Changes |
+|---|---|
+| `src/lib/copyExporter.ts` | New file — deterministic DOM-to-markdown copy extractor |
+| `src/lib/vibePrompt.ts` | Added `buildBlueprinterPrompt()` function for the three-input workflow |
+| `src/components/DesignExtractor.tsx` | Extended outputMode to include 'blueprinter'; added third radio button; skip blueprint/BUILD.md calls in blueprinter mode; generate copy.md from structure source HTML; show design.md + copy.md panels; pass blueprinter props to VibePromptPanel; add screenshot-attach note |
+
+#### What Did NOT Change
+
+- 'full' and 'single' output modes — completely unchanged
+- design.md generation, extract-css, platform detection, frequency analysis
+- The vibePrompt panel's other targets (Lovable, Bolt, v0, Claude Design, Generic)
+- Rule 0 and NOT FOUND in design.md
 
 ---
 

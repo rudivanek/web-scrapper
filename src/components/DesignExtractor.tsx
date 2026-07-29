@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callClaude, callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
@@ -12,7 +12,8 @@ import {
 } from '../lib/prompts/designExtractionPrompts';
 import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
-import { buildVibePrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
+import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
+import { buildCopyMarkdown } from '../lib/copyExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -45,7 +46,9 @@ interface ExtractionResult {
   provenance: string | null;
   platformMismatch: boolean;
   platformMismatchNote: string | null;
-  outputMode: 'full' | 'single';
+  outputMode: 'full' | 'single' | 'blueprinter';
+  copyMd: string | null;
+  copyProvenance: string | null;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -253,22 +256,29 @@ function OutputPanel({
 
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
+  outputMode, copyMd, copyProvenance, designMd,
 }: {
-  buildMd: string;
+  buildMd: string | null;
   blueprintJson: string;
   provenance: string | null;
   buildTarget: BuildTarget;
   vibeTarget: VibeTarget;
   onTargetChange: (t: VibeTarget) => void;
+  outputMode: 'full' | 'single' | 'blueprinter';
+  copyMd: string | null;
+  copyProvenance: string | null;
+  designMd: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const prompt = buildVibePrompt(
-    vibeTarget,
-    { buildMd, blueprintJson, provenance },
-    buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html',
-  );
+  const prompt = outputMode === 'blueprinter' && copyMd && designMd
+    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd)
+    : buildVibePrompt(
+        vibeTarget,
+        { buildMd: buildMd ?? '', blueprintJson, provenance },
+        buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html',
+      );
 
   return (
     <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
@@ -313,6 +323,11 @@ function VibePromptPanel({
             ))}
           </div>
         </div>
+        {outputMode === 'blueprinter' && (
+          <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800">
+            <strong>Importante:</strong> Debes adjuntar tu propia captura de pantalla de inspiración al builder. En modo Blueprinter, la app no suministra captura — la captura provee el layout y la composición visual que design.md y copy.md no pueden transmitir.
+          </div>
+        )}
         {expanded && (
           <pre className="text-xs font-mono bg-gray-900 text-green-400 overflow-auto max-h-[500px] leading-relaxed whitespace-pre-wrap break-words p-4 rounded">
             {prompt}
@@ -341,7 +356,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [structureUrl, setStructureUrl] = useState('');
   const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
-  const [outputMode, setOutputMode] = useState<'full' | 'single'>('full');
+  const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('full');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
 
   const resolvedKey = localApiKey || anthropicKey || null;
@@ -457,8 +472,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         designScreenshotSegments = await prepareScreenshot(designScreenshot);
       }
 
+      // Blueprinter mode: skip blueprint JSON and BUILD.md entirely
+      const isBlueprinter = outputMode === 'blueprinter';
+      let blueprintJson = '';
+
       // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
       // Blueprint is generated before design.md so the design call can use the blueprint's page_title and sections.
+      // Skipped in Blueprinter mode (no blueprint.json needed).
+      if (!isBlueprinter) {
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 45);
       // FIX 2: trace — confirm the full design.md reaches the blueprint call (design.md is generated later,
       // but the blueprint call itself does NOT consume design.md; it consumes cleanedHtml + assetManifestText.
@@ -469,7 +490,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
 
       // Attempt to parse and re-stringify for clean JSON
-      let blueprintJson = blueprintRaw.trim();
+      blueprintJson = blueprintRaw.trim();
       try {
         const parsed = JSON.parse(blueprintJson);
         blueprintJson = JSON.stringify(parsed, null, 2);
@@ -497,27 +518,35 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         } catch { /* keep original blueprint */ }
       }
 
+      } // end if (!isBlueprinter) — blueprint block
+
       // Phase 5: LLM Call B — design.md (from design source A, with B's blueprint as context)
+      // In Blueprinter mode, design.md is generated without blueprint context.
       setPhase('llm-design', 'Generating design.md with Claude...', 70);
-      const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, blueprintJson, cssLooksInsufficient);
+      const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, isBlueprinter ? undefined : blueprintJson, cssLooksInsufficient);
       let designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, designScreenshotSegments.length > 0 ? designScreenshotSegments : undefined);
       console.log(`[pipeline] design.md generated: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
 
       // Provenance injection
       let provenanceLine: string | null = null;
-      if (dual) {
+      if (dual && !isBlueprinter) {
         provenanceLine = copySrc === 'placeholder'
           ? `Estructura de ${structUrl}; texto pendiente de reescritura.`
           : `Sistema de diseño de ${designUrl}. Estructura y contenido de ${structUrl}.`;
       }
+      if (isBlueprinter && dual) {
+        provenanceLine = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
+      }
 
       if (provenanceLine) {
         designMd = `> ${provenanceLine}\n\n${designMd}`;
-        try {
-          const bpParsedProv = JSON.parse(blueprintJson);
-          bpParsedProv._provenance = provenanceLine;
-          blueprintJson = JSON.stringify(bpParsedProv, null, 2);
-        } catch { /* keep original */ }
+        if (!isBlueprinter) {
+          try {
+            const bpParsedProv = JSON.parse(blueprintJson);
+            bpParsedProv._provenance = provenanceLine;
+            blueprintJson = JSON.stringify(bpParsedProv, null, 2);
+          } catch { /* keep original */ }
+        }
       }
 
       // Platform mismatch detection
@@ -532,7 +561,19 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         }
       }
 
-      // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target)
+      // Blueprinter mode: generate copy.md from the structure source HTML (deterministic, no LLM)
+      let copyMd: string | null = null;
+      let copyProvenance: string | null = null;
+      if (isBlueprinter) {
+        const copyHtml = dual ? structureRawHtml : designRawHtml;
+        const copyUrl = dual ? structUrl : designUrl;
+        copyMd = buildCopyMarkdown(copyHtml, copyUrl);
+        if (dual) {
+          copyProvenance = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
+        }
+      }
+
+      // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target, skipped in Blueprinter mode)
       // Generated in three sequential calls to avoid truncation:
       //   Call 1: Foundation (sections 1–4), max_tokens 16000
       //   Call 2: Sections (section 5), max_tokens 16000 — batched if >8 sections
@@ -543,7 +584,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       let assumptionRatio = 0;
       let assumptionCount = 0;
       let valueCount = 0;
-      if (buildTarget === 'react-tailwind') {
+      if (buildTarget === 'react-tailwind' && !isBlueprinter) {
         setPhase('llm-buildspec', 'Generando especificación de reconstrucción (BUILD.md)...', 90);
         try {
           const imgs = screenshotSegments.length > 0 ? screenshotSegments : undefined;
@@ -718,12 +759,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Single-file mode: prepend LLM usage header above the BUILD.md fixed header
       if (outputMode === 'single' && buildMd) {
+        // (unchanged — single-file mode behavior)
         const llmHeader = `# Design & Build Specification — ${hostname(structUrl)}\nThis is a complete, self-contained design specification extracted from ${designUrl}. It contains the full design system (colors, typography, spacing, components) and section-by-section structure needed to rebuild this page.\nValues marked ASSUMED were inferred visually, not extracted from CSS — review them before relying on them. Feed this entire file to an LLM to recreate the page.`;
         buildMd = `${llmHeader}\n\n${buildMd}`;
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode });
+      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
@@ -892,6 +934,18 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               className="w-4 h-4"
             />
             <span className="text-sm text-gray-700">Un solo archivo (para otro LLM)</span>
+          </label>
+          <label className={`flex items-center space-x-2.5 cursor-pointer px-4 py-2.5 rounded-lg border transition-colors ${outputMode === 'blueprinter' ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+            <input
+              type="radio"
+              name="outputMode"
+              value="blueprinter"
+              checked={outputMode === 'blueprinter'}
+              onChange={() => setOutputMode('blueprinter')}
+              disabled={isRunning}
+              className="w-4 h-4"
+            />
+            <span className="text-sm text-gray-700">Blueprinter (design.md + copy.md)</span>
           </label>
         </div>
       </div>
@@ -1091,8 +1145,8 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
-          {/* design.md output — hidden in single-file mode */}
-          {result.outputMode === 'full' && (
+          {/* design.md output — shown in full and blueprinter modes */}
+          {(result.outputMode === 'full' || result.outputMode === 'blueprinter') && (
             <OutputPanel
               title="design.md"
               icon={<Palette className="w-4 h-4" />}
@@ -1134,7 +1188,25 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
-          {/* BUILD.md output (only for React/Tailwind) */}
+          {/* copy.md output — only in Blueprinter mode */}
+          {result.outputMode === 'blueprinter' && result.copyMd && (
+            <OutputPanel
+              title="copy.md"
+              icon={<FileText className="w-4 h-4" />}
+              content={result.copyMd}
+              filename={`${site}-copy.md`}
+              downloadMime="text/markdown"
+            />
+          )}
+
+          {/* Blueprinter provenance note */}
+          {result.outputMode === 'blueprinter' && result.copyProvenance && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+              {result.copyProvenance}
+            </div>
+          )}
+
+          {/* BUILD.md output (only for React/Tailwind, not in Blueprinter mode) */}
           {result.buildTarget === 'react-tailwind' && result.buildMd && (
             <OutputPanel
               title={result.outputMode === 'single' ? 'Design Spec (para LLM)' : 'BUILD.md — Reconstruction Spec'}
@@ -1194,8 +1266,8 @@ ${result.blueprintJson}
             </div>
           )}
 
-          {/* Prompt para builder panel — shown in both output modes */}
-          {result.buildMd && (
+          {/* Prompt para builder panel — shown in full/single (BUILD.md) and blueprinter (design.md + copy.md) modes */}
+          {(result.buildMd || result.outputMode === 'blueprinter') && (
             <VibePromptPanel
               buildMd={result.buildMd}
               blueprintJson={result.blueprintJson}
@@ -1203,6 +1275,10 @@ ${result.blueprintJson}
               buildTarget={result.buildTarget}
               vibeTarget={vibeTarget}
               onTargetChange={setVibeTarget}
+              outputMode={result.outputMode}
+              copyMd={result.copyMd}
+              copyProvenance={result.copyProvenance}
+              designMd={result.designMd}
             />
           )}
         </div>
