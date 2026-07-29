@@ -796,22 +796,38 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
   const site = hostname(structureUrl.trim() || url);
 
-  const phases: Array<{ key: ExtractionState['phase']; label: string }> = isDualUrl
-    ? [
-        { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
-        { key: 'scrape-structure', label: 'Phase 2 — Scrape structure source (URL B)' },
-        { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
-        { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON from URL B (Claude)' },
-        { key: 'llm-design', label: 'Phase 5 — Generate design.md from URL A (Claude)' },
-        { key: 'llm-buildspec', label: 'Phase 6 — Generate BUILD.md (Claude)' },
-      ]
-    : [
-        { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
-        { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
-        { key: 'llm-blueprint', label: 'Phase 3 — Generate blueprint JSON (Claude)' },
-        { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
-        { key: 'llm-buildspec', label: 'Phase 5 — Generate BUILD.md (Claude)' },
-      ];
+  const phases: Array<{ key: ExtractionState['phase']; label: string }> =
+    outputMode === 'blueprinter'
+      ? isDualUrl
+        ? [
+            { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
+            { key: 'scrape-structure', label: 'Phase 2 — Scrape copy source (URL B)' },
+            { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
+            { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
+            { key: 'done', label: 'Phase 5 — Extract copy.md (deterministic)' },
+          ]
+        : [
+            { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
+            { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
+            { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
+            { key: 'done', label: 'Phase 4 — Extract copy.md (deterministic)' },
+          ]
+      : isDualUrl
+        ? [
+            { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
+            { key: 'scrape-structure', label: 'Phase 2 — Scrape structure source (URL B)' },
+            { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
+            { key: 'llm-blueprint', label: 'Phase 4 — Generate blueprint JSON from URL B (Claude)' },
+            { key: 'llm-design', label: 'Phase 5 — Generate design.md from URL A (Claude)' },
+            { key: 'llm-buildspec', label: 'Phase 6 — Generate BUILD.md (Claude)' },
+          ]
+        : [
+            { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
+            { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
+            { key: 'llm-blueprint', label: 'Phase 3 — Generate blueprint JSON (Claude)' },
+            { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
+            { key: 'llm-buildspec', label: 'Phase 5 — Generate BUILD.md (Claude)' },
+          ];
 
   const currentPhaseIdx = phases.findIndex(p => p.key === state.phase);
 

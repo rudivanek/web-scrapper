@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.10 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.11 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -1815,11 +1815,20 @@ Stored as `outputMode = 'full' | 'single' | 'blueprinter'`. The 'full' and 'sing
 
 #### Blueprinter Pipeline
 
-When `outputMode === 'blueprinter'`:
-- Runs the design pipeline (extract-css + platform detection + design.md) as today. design.md is output unchanged.
-- Runs deterministic copy extraction (no LLM call) to produce copy.md from the rendered rawHtml.
-- Skips blueprint JSON generation and BUILD.md generation entirely — this makes the mode significantly faster.
+When `outputMode === 'blueprinter'`, the pipeline runs exactly 5 phases and skips the two expensive Claude calls (blueprint JSON and BUILD.md) entirely — they are not run, not even discarded:
+
+1. **Phase 1 — Scrape design source (URL A)** — Firecrawl scrape for rawHtml + screenshot
+2. **Phase 2 — Scrape copy source (URL B, or A if empty)** — Firecrawl scrape for rawHtml
+3. **Phase 3 — Fetch external stylesheets (URL A)** — extract-css
+4. **Phase 4 — Generate design.md (Claude)** — the only LLM call in this mode
+5. **Phase 5 — Extract copy.md (deterministic)** — DOM parsing, no Claude call, near-instant
+
+The phase progress bar displays only these 5 phases in Blueprinter mode. In 'full' and 'single' modes, the full 5- or 6-phase pipeline (including blueprint JSON and BUILD.md) runs unchanged.
+
+copy.md section grouping derives directly from the rawHtml DOM (nearest section/header ancestor), NOT from the generated blueprint JSON. The `buildCopyMarkdown()` function in `src/lib/copyExporter.ts` is completely independent of blueprint JSON — it parses the HTML with DOMParser and walks the DOM tree to group text by section. This ensures copy extraction works even though blueprint JSON is never generated in this mode.
+
 - Presents exactly two download cards: design.md and copy.md.
+- copy.md is always included in the output when `outputMode === 'blueprinter'`.
 
 #### Dual URL Support
 
