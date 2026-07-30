@@ -122,6 +122,10 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
   // ── Background images from inline styles and <style> blocks ──
   const backgroundImages: string[] = [];
   const bgUrlRe = /url\(["']?([^"')]+)["']?\)/g;
+  // @font-face rules also use url(), so a raw scan picks up .ttf/.woff files and lists
+  // them as background images. Reject anything that clearly is not an image.
+  const NON_IMAGE_ASSET_RE = /\.(ttf|otf|woff2?|eot|css|js|mjs|json|map|mp4|webm|mov|mp3|wav|pdf|zip)(\?|#|$)/i;
+  const isImageUrl = (u: string): boolean => !NON_IMAGE_ASSET_RE.test(u);
 
   const inlineStyleRe = /style="([^"]*)"/gi;
   let m: RegExpExecArray | null;
@@ -131,7 +135,7 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
     let bgm: RegExpExecArray | null;
     while ((bgm = bgUrlRe.exec(styleVal)) !== null) {
       const url = toAbsolute(bgm[1], origin, base);
-      if (url && !url.startsWith('data:')) backgroundImages.push(url);
+      if (url && !url.startsWith('data:') && isImageUrl(url)) backgroundImages.push(url);
     }
   }
 
@@ -143,7 +147,7 @@ export function extractAssetManifest(rawHtml: string, pageUrl: string): AssetMan
     let bgm: RegExpExecArray | null;
     while ((bgm = bgUrlRe.exec(css)) !== null) {
       const url = toAbsolute(bgm[1], origin, base);
-      if (url && !url.startsWith('data:') && !backgroundImages.includes(url)) {
+      if (url && !url.startsWith('data:') && isImageUrl(url) && !backgroundImages.includes(url)) {
         backgroundImages.push(url);
       }
     }

@@ -30,7 +30,16 @@ function isButtonLike(el: Element): boolean {
 }
 
 function getVisibleText(el: Element): string {
-  return (el.textContent?.trim() ?? '').replace(/\s+/g, ' ');
+  // <br> carries no whitespace in textContent, so "Meant<br>To Be" would collapse to
+  // "MeantTo Be". Clone and swap each <br> for a space before reading the text.
+  const clone = el.cloneNode(true) as Element;
+  const breaks = clone.querySelectorAll('br');
+  if (breaks.length > 0) {
+    for (const br of Array.from(breaks)) {
+      br.replaceWith(' ');
+    }
+  }
+  return (clone.textContent?.trim() ?? '').replace(/\s+/g, ' ');
 }
 
 function getDirectText(el: Element): string | null {
@@ -187,7 +196,12 @@ function detectFooterColumns(footer: Element): { columns: FooterColumn[]; flat: 
         const h = container.querySelector(hTag);
         if (h) {
           heading = getVisibleText(h);
-          if (heading) break;
+          if (heading) {
+            // Claim it, or the leftovers pass re-emits it as "#### Contacto".
+            seen.add(h);
+            for (const child of Array.from(h.querySelectorAll('*'))) seen.add(child);
+            break;
+          }
         }
       }
       // If no heading tag, check for a <p> or <span> that looks like a label (short, bold-ish)
@@ -203,18 +217,24 @@ function detectFooterColumns(footer: Element): { columns: FooterColumn[]; flat: 
       let allSocial = true;
       let allContact = true;
 
+      const columnTexts = new Set<string>();
       for (const el of container.querySelectorAll('a, button, [role="button"], p, li, span')) {
         if (shouldSkipElement(el)) continue;
         if (seen.has(el)) continue;
         const text = getVisibleText(el);
         if (!text) continue;
         seen.add(el);
+        // Claim descendants: <li><a><span>X</span></a></li> would otherwise emit X three times.
+        for (const child of Array.from(el.querySelectorAll('*'))) seen.add(child);
 
         if (!isSocialLink(el)) allSocial = false;
         if (!isContactText(text)) allContact = false;
 
         const extracted = extractTextFromElement(el);
-        lines.push(extracted || text);
+        const line = extracted || text;
+        if (columnTexts.has(line)) continue;
+        columnTexts.add(line);
+        lines.push(line);
       }
 
       if (lines.length === 0) continue;
@@ -228,6 +248,7 @@ function detectFooterColumns(footer: Element): { columns: FooterColumn[]; flat: 
   }
 
   // Collect remaining footer content not captured by columns
+  const remainingTexts = new Set<string>();
   const remaining: string[] = [];
   for (const el of footer.querySelectorAll('a, button, [role="button"], p, li, h1, h2, h3, h4, h5, h6, span')) {
     if (shouldSkipElement(el)) continue;
@@ -235,8 +256,16 @@ function detectFooterColumns(footer: Element): { columns: FooterColumn[]; flat: 
     const text = getVisibleText(el);
     if (!text) continue;
     seen.add(el);
+    // Claim every descendant too. Without this, <li><a><span>Contacto</span></a></li>
+    // emits "Contacto" three times — once per matching element.
+    for (const child of Array.from(el.querySelectorAll('*'))) {
+      seen.add(child);
+    }
     const extracted = extractTextFromElement(el);
-    remaining.push(extracted || text);
+    const line = extracted || text;
+    if (remainingTexts.has(line)) continue;
+    remainingTexts.add(line);
+    remaining.push(line);
   }
 
   // Classify remaining items
@@ -378,9 +407,18 @@ export function buildCopyMarkdown(rawHtml: string, pageUrl: string): string {
     if (shouldSkipElement(nav)) continue;
     navLines.push(...collectAllText(nav));
   }
+  // WordPress/Elementor themes often ship more than one <footer> (desktop + mobile
+  // variants, or a nested one). Emitting each produces a duplicated footer in copy.md,
+  // which the AI builder then faithfully renders twice. Keep only distinct content.
+  const seenFooterSignatures = new Set<string>();
   for (const footer of body.querySelectorAll('footer')) {
     if (shouldSkipElement(footer)) continue;
-    footerColumns.push(detectFooterColumns(footer));
+    const detected = detectFooterColumns(footer);
+    const signature = formatFooterColumns(detected.columns, detected.flat).join('\n').trim();
+    if (!signature) continue;
+    if (seenFooterSignatures.has(signature)) continue;
+    seenFooterSignatures.add(signature);
+    footerColumns.push(detected);
   }
 
   const sectionGroups = new Map<Element, string[]>();
