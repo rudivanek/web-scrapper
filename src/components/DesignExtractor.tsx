@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
-import { callClaude, callWithContinuation } from '../lib/callClaude';
+import { callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
@@ -35,6 +35,7 @@ interface ExtractionResult {
   blueprintJson: string;
   buildMd: string | null;
   designMdIncomplete: boolean;
+  blueprintIncomplete: boolean;
   buildMdIncomplete: boolean;
   buildMdHighAssumption: boolean;
   assumptionRatio: number;
@@ -561,6 +562,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Blueprinter mode: skip blueprint JSON and BUILD.md entirely
       const isBlueprinter = outputMode === 'blueprinter';
       let blueprintJson = '';
+      let blueprintIncomplete = false;
 
       // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
       // Blueprint is generated before design.md so the design call can use the blueprint's page_title and sections.
@@ -573,7 +575,22 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       console.log(`[pipeline] design.md -> blueprint: design.md not yet generated at this stage (blueprint runs first)`);
       console.log(`[pipeline] blueprint inputs: cleanedHtml=${cleanedHtml.length} chars, assetManifest=${assetManifestText.length} chars, screenshots=${screenshotSegments.length}`);
       const blueprintUserPrompt = buildBlueprintUserPrompt(cleanedHtml, undefined, assetManifestText);
-      const blueprintRaw = await callClaude(apiKey, BLUEPRINT_SYSTEM_PROMPT, blueprintUserPrompt, 8000, screenshotSegments.length > 0 ? screenshotSegments : undefined);
+      // A truncated blueprint is worse than a truncated markdown file: it is invalid JSON, so the
+      // section editor silently shows nothing and the builder prompt silently drops back to four
+      // inputs. Use continuation, and flag both truncation and unparseable output.
+      const blueprintRes = await callWithContinuation(
+        apiKey,
+        BLUEPRINT_SYSTEM_PROMPT,
+        blueprintUserPrompt,
+        16000,
+        screenshotSegments.length > 0 ? screenshotSegments : undefined,
+        'blueprint.json',
+      );
+      const blueprintRaw = blueprintRes.text;
+      if (blueprintRes.truncated) {
+        console.warn('[blueprint] truncated after continuations (stop_reason=max_tokens)');
+        blueprintIncomplete = true;
+      }
 
       // Attempt to parse and re-stringify for clean JSON
       blueprintJson = blueprintRaw.trim();
@@ -583,6 +600,14 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       } catch {
         // Keep raw if parse fails — LLM may have added fences
         blueprintJson = blueprintRaw.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+        // If it still will not parse after stripping fences, the JSON is genuinely broken
+        // (almost always because it was cut short). Say so instead of failing silently.
+        try {
+          JSON.parse(blueprintJson);
+        } catch {
+          console.warn('[blueprint] output is not valid JSON after fence stripping — likely truncated');
+          blueprintIncomplete = true;
+        }
       }
 
       // Post-blueprint: replace copy with placeholders if requested
@@ -887,7 +912,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
       if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
@@ -1399,6 +1424,18 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               filename={`${site}-design.md`}
               downloadMime="text/markdown"
             />
+          )}
+
+          {/* blueprint truncation / invalid JSON notice */}
+          {result.blueprintIncomplete && (
+            <div className="flex items-start space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Advertencia: la lista de secciones quedó incompleta o no es JSON válido. El editor de
+                estructura puede aparecer vacío y el prompt para builder no incluirá la lista de secciones.
+                Vuelve a extraer, o corrige la estructura a mano en el editor.
+              </span>
+            </div>
           )}
 
           {/* design.md truncation notice */}
