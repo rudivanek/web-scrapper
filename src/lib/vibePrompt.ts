@@ -505,8 +505,62 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
 
 // ─── Blueprinter prompt (design.md + copy.md + user screenshot) ───────────────
 
-export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html'): string {
+/**
+ * Formats the blueprint's sections for the Blueprinter prompt: order, type, layout
+ * and the layout_contract rules. Returns '' when there is no usable blueprint, so
+ * the prompt stays byte-identical to its pre-blueprint form.
+ */
+function formatBlueprintForPrompt(blueprintJson?: string): string {
+  if (!blueprintJson || !blueprintJson.trim()) return '';
+  let bp: { sections?: unknown };
+  try {
+    bp = JSON.parse(blueprintJson);
+  } catch {
+    return '';
+  }
+  if (!bp || !Array.isArray(bp.sections) || bp.sections.length === 0) return '';
+
+  const lines: string[] = [];
+  (bp.sections as Record<string, unknown>[]).forEach((s, i) => {
+    const name = typeof s.section_name === 'string' ? s.section_name : `Section ${i + 1}`;
+    const type = typeof s.section_type === 'string' ? s.section_type : 'content';
+    lines.push(`### ${i + 1}. ${name} (${type})`);
+
+    const lc = (s.layout_contract && typeof s.layout_contract === 'object')
+      ? s.layout_contract as Record<string, unknown>
+      : {};
+    const desktop = typeof lc.desktop_layout === 'string' ? lc.desktop_layout : '';
+    const mobile = typeof lc.mobile_layout === 'string' ? lc.mobile_layout : '';
+    if (desktop || mobile) {
+      lines.push(`- Layout: desktop ${desktop || 'unspecified'} / mobile ${mobile || 'unspecified'}`);
+    }
+    const cols = typeof lc.column_structure === 'string' ? lc.column_structure : '';
+    if (cols) lines.push(`- Columns: ${cols}`);
+
+    const asList = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    const must = asList(lc.must_preserve);
+    const dont = asList(lc.do_not_do);
+    if (must.length) lines.push(`- MUST PRESERVE: ${must.join('; ')}`);
+    if (dont.length) lines.push(`- DO NOT: ${dont.join('; ')}`);
+    lines.push('');
+  });
+
+  return lines.join('\n').trimEnd();
+}
+
+export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html', blueprintJson?: string): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
+
+  const blueprintBlock = formatBlueprintForPrompt(blueprintJson);
+  const hasBlueprint = blueprintBlock !== '';
+  const inputCount = hasBlueprint ? 'five' : 'four';
+  const blueprintInput = hasBlueprint
+    ? `\n5. SECTION ORDER & LAYOUT RULES — from the section list below. Build the sections in exactly this order. For each section, treat MUST PRESERVE as mandatory and DO NOT as forbidden. Where the section list and the screenshot disagree about layout, follow the section list.`
+    : '';
+  const blueprintSection = hasBlueprint
+    ? `\n\n---\n\n## Section list (authoritative structure)\n\n${blueprintBlock}`
+    : '';
 
   const imagesSection = imagesMd
     ? `\n\n---\n\n## images.md\n\n\`\`\`markdown\n${imagesMd}\n\`\`\``
@@ -522,12 +576,12 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
 
   return `# Rebuild Prompt — ${targetLabel} (Blueprinter mode)
 
-Build a web page from four inputs, each with one job:
+Build a web page from ${inputCount} inputs, each with one job:
 
 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 2. DESIGN SYSTEM — from design.md below. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
 3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
-4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.
+4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
@@ -547,7 +601,7 @@ ${designMd}
 
 \`\`\`markdown
 ${copyMd}
-\`\`\`${imagesSection}`;
+\`\`\`${imagesSection}${blueprintSection}`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────

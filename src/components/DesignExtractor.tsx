@@ -304,7 +304,7 @@ function VibePromptPanel({
   const outputTarget: BuildOutputTarget = builderFormat === 'react' ? 'react-tailwind' : 'plain-html';
 
   const prompt = outputMode === 'blueprinter' && copyMd && designMd
-    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem', builderFormat)
+    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem', builderFormat, blueprintJson)
     : buildVibePrompt(
         vibeTarget,
         { buildMd: buildMd ?? '', blueprintJson, provenance },
