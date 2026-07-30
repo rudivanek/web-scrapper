@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.17 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.18 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -2025,17 +2025,28 @@ The sound fires once at the end of the run — not on each phase. On success it 
 
 A mute toggle (speaker icon) appears near the results. Default ON. When muted, no sound plays on success or error. The preference is kept in component state.
 
+#### Replit Target (2026-07-30)
+
+**Added:** 2026-07-30 — A new "Replit" target in the "Prompt para builder" panel. Replit appears in the platform button row after "Claude Design" and before "Any". Replit builds full apps, so its prompt branch is framed like Bolt: full-project framing, single-page, real files. The prompt instructs the builder to produce a full project structure (package.json, vite.config, tailwind.config, src/ files) using Vite + React + Tailwind, or a single index.html for plain HTML. The same fidelity rules apply: exact images, exact copy, exact sections, no placeholders, no invented content.
+
+In Blueprinter mode, Replit uses the same three-input framing (design.md + copy.md + user screenshot) with the "attach your own inspiration screenshot" note — identical to every other target.
+
+#### Download Prompt as .md (2026-07-30)
+
+**Added:** 2026-07-30 — A "Descargar .md" button appears next to the existing "Copiar prompt" button in the "Prompt para builder" panel. It downloads the currently-shown prompt (for the selected platform) as a file named `{site}-prompt-{platform}.md`, e.g. `sharpen-studio-prompt-lovable.md`. The file content is exactly the prompt text shown in the panel, unchanged. Switching platform changes what gets downloaded — it always matches what's displayed.
+
 #### Files Changed
 
 | File | Changes |
 |---|---|
-| `src/components/DesignExtractor.tsx` | Added `playDoneSound('success'\|'error')` helper using Web Audio API; added `soundEnabled` state (default true); call `playDoneSound` on success and error at end of run; added Volume2/VolumeX mute toggle button near results |
+| `src/lib/vibePrompt.ts` | Added `'replit'` to `VibeTarget` type and `VIBE_TARGETS` array; added `buildReplitPrompt()` function with full-project framing; added `case 'replit'` to `buildVibePrompt` switch |
+| `src/components/DesignExtractor.tsx` | Added `siteName` prop to `VibePromptPanel`; added "Descargar .md" button that downloads the prompt as `{siteName}-prompt-{vibeTarget}.md` |
 
 #### What Did NOT Change
 
 - 'full' and 'single' output modes — code paths intact but hidden from the UI; `outputMode` defaults to `'blueprinter'` and the radio selector is replaced with a static label
 - design.md generation, extract-css, platform detection, frequency analysis
-- The vibePrompt panel's other targets (Lovable, Bolt, v0, Claude Design, Generic)
+- The vibePrompt panel's other targets (Lovable, Bolt, v0, Claude Design, Replit, Generic)
 - Rule 0 and NOT FOUND in design.md
 
 ---

@@ -278,7 +278,7 @@ function OutputPanel({
 
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
-  outputMode, copyMd, imagesMd, designMd, copyMode,
+  outputMode, copyMd, imagesMd, designMd, copyMode, siteName,
 }: {
   buildMd: string | null;
   blueprintJson: string;
@@ -291,6 +291,7 @@ function VibePromptPanel({
   imagesMd: string | null;
   designMd: string;
   copyMode: 'scrape' | 'lorem';
+  siteName: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -318,6 +319,23 @@ function VibePromptPanel({
           >
             {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copied ? 'Copiado' : 'Copiar prompt'}</span>
+          </button>
+          <button
+            onClick={() => {
+              const blob = new Blob([prompt], { type: 'text/markdown' });
+              const dlUrl = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = dlUrl;
+              a.download = `${siteName}-prompt-${vibeTarget}.md`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(dlUrl);
+            }}
+            className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 rounded transition-colors"
+          >
+            <FileDown className="w-3.5 h-3.5" />
+            <span>Descargar .md</span>
           </button>
           <button
             onClick={() => setExpanded(o => !o)}
@@ -1425,6 +1443,7 @@ ${result.blueprintJson}
               imagesMd={result.imagesMd}
               designMd={result.designMd}
               copyMode={copyMode}
+              siteName={site}
             />
           )}
         </div>

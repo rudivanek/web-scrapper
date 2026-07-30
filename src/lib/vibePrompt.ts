@@ -1,10 +1,11 @@
-export type VibeTarget = 'lovable' | 'bolt' | 'v0' | 'claude-design' | 'generic';
+export type VibeTarget = 'lovable' | 'bolt' | 'v0' | 'claude-design' | 'replit' | 'generic';
 
 export const VIBE_TARGETS: { id: VibeTarget; label: string }[] = [
   { id: 'lovable', label: 'Lovable' },
   { id: 'bolt', label: 'Bolt' },
   { id: 'v0', label: 'v0' },
   { id: 'claude-design', label: 'Claude Design' },
+  { id: 'replit', label: 'Replit' },
   { id: 'generic', label: 'Any' },
 ];
 
@@ -421,6 +422,50 @@ ${buildOutputFormatNote(target)}
 ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
 }
 
+function buildReplitPrompt(input: VibePromptInput, target: BuildOutputTarget): string {
+  const colors = extractColors(input.buildMd);
+  const fonts = extractFonts(input.buildMd);
+  const images = extractImageUrls(input.buildMd, input.blueprintJson);
+  const sections = extractSectionNames(input.blueprintJson);
+  const contracts = extractLayoutContracts(input.blueprintJson);
+  const hasAssumed = hasAssumptions(input.buildMd);
+  const fontsBlock = formatFonts(fonts);
+
+  return `# Rebuild Prompt — Replit
+
+## PROJECT FRAMING
+Build a complete project that reproduces the page described in the specification below. The project should be a full single-page application using Vite + React + Tailwind CSS (or a single index.html if plain HTML was requested). Do not redesign or improve — reproduce faithfully.
+
+## DESIGN SYSTEM (from real CSS)
+\`\`\`css
+:root {
+${formatColors(colors)}
+}
+\`\`\`
+Fonts:
+${fontsBlock}
+${hasAssumed ? '\nNote: Some values are marked ASSUMED — inferred visually, not from CSS. Use them as given.' : ''}
+
+## SECTIONS (build in this exact order)
+${formatSections(sections)}
+
+## LAYOUT CONTRACTS
+${formatContracts(contracts)}
+
+## IMAGE URLS (use these exact URLs)
+${formatImages(images)}
+${MANDATORY_RULES}
+${buildOutputFormatNote(target)}
+
+## REPLIT-SPECIFIC INSTRUCTIONS
+- Frame this as a full project: provide the full file structure (package.json, vite.config, tailwind.config, src/ files).
+- If React/Tailwind: use a Vite structure with index.html as the entry point.
+- If plain HTML: produce a single index.html with inline <style> containing the :root block.
+- Each section should be its own component or clearly delimited block.
+- Build real files, not a single snippet — Replit builds full apps.
+${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure came from different sites. Apply the design system to the structure faithfully.' : ''}`;
+}
+
 function buildGenericPrompt(input: VibePromptInput, target: BuildOutputTarget): string {
   const colors = extractColors(input.buildMd);
   const fonts = extractFonts(input.buildMd);
@@ -515,6 +560,7 @@ export function buildVibePrompt(
     case 'bolt': return buildBoltPrompt(input, outputTarget);
     case 'v0': return buildV0Prompt(input, outputTarget);
     case 'claude-design': return buildClaudeDesignPrompt(input, outputTarget);
+    case 'replit': return buildReplitPrompt(input, outputTarget);
     case 'generic': return buildGenericPrompt(input, outputTarget);
   }
 }
