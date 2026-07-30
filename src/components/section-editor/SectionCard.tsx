@@ -462,7 +462,7 @@ export function SectionCard({
           {!expanded && (
             <p className="text-gray-400 text-xs truncate mt-0.5">
               {hasContract
-                ? `${contract.desktop_layout} · ${contract.mobile_layout || 'móvil sin definir'} · ${section.text_blocks.length} bloques · ${section.assets.length} imágenes`
+                ? `${contract.desktop_layout} · ${contract.mobile_layout || 'móvil sin definir'} · ${section.text_blocks.length} ${section.text_blocks.length === 1 ? 'bloque' : 'bloques'} · ${section.assets.length} ${section.assets.length === 1 ? 'imagen' : 'imágenes'}`
                 : <span className="text-amber-600">Sin layout contract — extrae la página o complétalo a mano</span>}
             </p>
           )}
@@ -608,3 +608,6 @@ export function SectionCard({
     </div>
   );
 }
+
+
+export { SectionCard }
