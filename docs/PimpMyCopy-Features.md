@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.16 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.17 | Last Updated: 2026-07-29T00:00:00Z -->
 
 ---
 
@@ -2014,14 +2014,22 @@ In the vibePrompt panel, when `outputMode === 'blueprinter'`, the generated prom
 
 The panel displays a note reminding the user they must attach their own inspiration screenshot — the app does not supply one in this mode.
 
+#### Completion Sound (Web Audio API)
+
+A short pleasant chime plays when an extraction run finishes, so the user doesn't have to watch the progress bar during long runs. Uses the Web Audio API directly — no external audio file.
+
+- **Success:** two ascending sine notes (880 Hz → 1174.7 Hz), each 0.35 s with a 0.12 s gap.
+- **Error:** two descending sine notes (587.3 Hz → 392 Hz) — same envelope, distinct lower tone so the user is notified either way.
+
+The sound fires once at the end of the run — not on each phase. On success it plays right after the output files are ready and results are shown; on failure it plays right after the error message is set. The entire audio helper is wrapped in try/catch — audio never throws or blocks the pipeline. Since the user clicked "Extract Design" to start the run, the prior user interaction required by some browsers has already happened, so playback at completion is allowed.
+
+A mute toggle (speaker icon) appears near the results. Default ON. When muted, no sound plays on success or error. The preference is kept in component state.
+
 #### Files Changed
 
 | File | Changes |
 |---|---|
-| `src/lib/copyExporter.ts` | New file — deterministic DOM-to-markdown copy extractor |
-| `src/lib/imageExporter.ts` | New file — deterministic image URL extractor; reuses assetExtractor.ts; optional Unsplash filler |
-| `src/lib/vibePrompt.ts` | Added `buildBlueprinterPrompt()` function for the four-input workflow; accepts optional imagesMd |
-| `src/components/DesignExtractor.tsx` | Extended outputMode to include 'blueprinter'; added third radio button; skip blueprint/BUILD.md calls in blueprinter mode; generate copy.md + images.md from source HTML; show design.md + copy.md + images.md panels; pass blueprinter props to VibePromptPanel; add screenshot-attach note; add Unsplash filler checkbox |
+| `src/components/DesignExtractor.tsx` | Added `playDoneSound('success'\|'error')` helper using Web Audio API; added `soundEnabled` state (default true); call `playDoneSound` on success and error at end of run; added Volume2/VolumeX mute toggle button near results |
 
 #### What Did NOT Change
 

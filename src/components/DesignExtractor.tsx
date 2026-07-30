@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callClaude, callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
@@ -81,6 +81,26 @@ function isValidUrl(s: string): boolean {
     const u = new URL(normalizeUrl(s));
     return u.protocol === 'http:' || u.protocol === 'https:';
   } catch { return false; }
+}
+
+function playDoneSound(type: 'success' | 'error' = 'success') {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    const freqs = type === 'success' ? [880, 1174.7] : [587.3, 392];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain); gain.connect(ctx.destination);
+      const t = now + i * 0.12;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      osc.start(t); osc.stop(t + 0.35);
+    });
+  } catch (e) { /* audio not available — ignore silently */ }
 }
 
 const MAX_COMBINED_CSS = 120000;
@@ -364,6 +384,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
   const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -791,10 +812,12 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       setPhase('done', 'Extraction complete.', 100);
       setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
       setError(msg);
       setState({ phase: 'error', message: msg, progress: 0 });
+      if (soundEnabled) playDoneSound('error');
     }
   };
 
@@ -1114,6 +1137,16 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       {/* Results */}
       {result && (
         <div className="space-y-5">
+          <div className="flex justify-end">
+            <button
+              onClick={() => setSoundEnabled(s => !s)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+              title={soundEnabled ? 'Silenciar sonido de finalización' : 'Activar sonido de finalización'}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              <span>{soundEnabled ? 'Sonido ON' : 'Sonido OFF'}</span>
+            </button>
+          </div>
           {/* Screenshot preview */}
           {result.screenshot && (
             <div className="border border-gray-200 rounded-lg overflow-hidden">
