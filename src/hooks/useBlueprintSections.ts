@@ -33,81 +33,48 @@ export function useBlueprintSections(
     lastEmitted.current = null;
   }, [blueprintJson]);
 
-  const commit = useCallback((next: BlueprintSection[]) => {
-    setSections(next);
-    setDirty(true);
+  const emit = useCallback((next: BlueprintSection[]) => {
     const json = serializeBlueprint(envelope, next);
     lastEmitted.current = json;
+    setSections(next);
+    setDirty(true);
     onChange?.(json);
   }, [envelope, onChange]);
 
   const updateSection = useCallback((uid: string, updates: Partial<BlueprintSection>) => {
-    setSections(prev => {
-      const next = prev.map(s => (s._uid === uid ? { ...s, ...updates } : s));
-      setDirty(true);
-      const json = serializeBlueprint(envelope, next);
-      lastEmitted.current = json;
-      onChange?.(json);
-      return next;
-    });
-  }, [envelope, onChange]);
+    emit(sections.map(s => (s._uid === uid ? { ...s, ...updates } : s)));
+  }, [sections, emit]);
 
   const addSection = useCallback((partial?: Partial<BlueprintSection>) => {
-    setSections(prev => {
-      const base = createEmptySection(prev.length + 1);
-      const next = [...prev, partial ? { ...base, ...partial, _uid: base._uid } : base];
-      setDirty(true);
-      const json = serializeBlueprint(envelope, next);
-      lastEmitted.current = json;
-      onChange?.(json);
-      return next;
-    });
-  }, [envelope, onChange]);
+    const base = createEmptySection(sections.length + 1);
+    const created = partial ? { ...base, ...partial, _uid: base._uid } : base;
+    emit([...sections, created]);
+  }, [sections, emit]);
 
   const deleteSection = useCallback((uid: string) => {
-    setSections(prev => {
-      const next = prev.filter(s => s._uid !== uid);
-      setDirty(true);
-      const json = serializeBlueprint(envelope, next);
-      lastEmitted.current = json;
-      onChange?.(json);
-      return next;
-    });
-  }, [envelope, onChange]);
+    emit(sections.filter(s => s._uid !== uid));
+  }, [sections, emit]);
 
   const moveSection = useCallback((uid: string, direction: -1 | 1) => {
-    setSections(prev => {
-      const idx = prev.findIndex(s => s._uid === uid);
-      const target = idx + direction;
-      if (idx === -1 || target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[target]] = [next[target], next[idx]];
-      setDirty(true);
-      const json = serializeBlueprint(envelope, next);
-      lastEmitted.current = json;
-      onChange?.(json);
-      return next;
-    });
-  }, [envelope, onChange]);
+    const idx = sections.findIndex(s => s._uid === uid);
+    const target = idx + direction;
+    if (idx === -1 || target < 0 || target >= sections.length) return;
+    const next = [...sections];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    emit(next);
+  }, [sections, emit]);
 
   const duplicateSection = useCallback((uid: string) => {
-    setSections(prev => {
-      const idx = prev.findIndex(s => s._uid === uid);
-      if (idx === -1) return prev;
-      const copy = createEmptySection(prev.length + 1);
-      const cloned: BlueprintSection = {
-        ...structuredClone({ ...prev[idx], _uid: '' }),
-        _uid: copy._uid,
-        section_name: `${prev[idx].section_name} (copy)`,
-      };
-      const next = [...prev.slice(0, idx + 1), cloned, ...prev.slice(idx + 1)];
-      setDirty(true);
-      const json = serializeBlueprint(envelope, next);
-      lastEmitted.current = json;
-      onChange?.(json);
-      return next;
-    });
-  }, [envelope, onChange]);
+    const idx = sections.findIndex(s => s._uid === uid);
+    if (idx === -1) return;
+    const fresh = createEmptySection(sections.length + 1);
+    const cloned: BlueprintSection = {
+      ...structuredClone({ ...sections[idx], _uid: '' }),
+      _uid: fresh._uid,
+      section_name: `${sections[idx].section_name} (copy)`,
+    };
+    emit([...sections.slice(0, idx + 1), cloned, ...sections.slice(idx + 1)]);
+  }, [sections, emit]);
 
   const toJson = useCallback(
     () => serializeBlueprint(envelope, sections),
@@ -124,7 +91,7 @@ export function useBlueprintSections(
     deleteSection,
     moveSection,
     duplicateSection,
-    replaceAll: commit,
+    replaceAll: emit,
     toJson,
   };
 }

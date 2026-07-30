@@ -480,6 +480,3 @@ export function applyTemplate(template: SectionTemplate, repeatCount: number): P
     estimated_height_desktop: null,
   };
 }
-
-
-export { SECTION_TEMPLATES, applyTemplate }

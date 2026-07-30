@@ -18,6 +18,7 @@ type BuilderFormat = 'html' | 'react';
 import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
+import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -436,6 +437,8 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
   const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
+  // Blueprint composed by hand when no extraction has run (section editor, composer mode).
+  const [manualBlueprint, setManualBlueprint] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const resolvedKey = localApiKey || anthropicKey || null;
@@ -1177,6 +1180,20 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           </div>
         </div>
       )}
+
+      {/* Section editor — available with or without an extraction */}
+      <SectionEditorPanel
+        blueprintJson={result ? result.blueprintJson : manualBlueprint}
+        onChange={json => {
+          if (result) {
+            setResult(prev => (prev ? { ...prev, blueprintJson: json } : prev));
+          } else {
+            setManualBlueprint(json);
+          }
+        }}
+        hasExtraction={Boolean(result)}
+        siteName={site}
+      />
 
       {/* Error */}
       {error && (
