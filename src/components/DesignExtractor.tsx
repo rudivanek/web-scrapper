@@ -439,6 +439,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
   // Blueprint composed by hand when no extraction has run (section editor, composer mode).
   const [manualBlueprint, setManualBlueprint] = useState('');
+  // Opt-in: also generate the section list (blueprint JSON) in Blueprinter mode, so the
+  // section editor has the crawled structure to edit. Off by default — costs one extra Claude call.
+  const [generateBlueprint, setGenerateBlueprint] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const resolvedKey = localApiKey || anthropicKey || null;
@@ -561,7 +564,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Phase 4: LLM Call A — blueprint JSON FIRST (with screenshot segments + asset manifest as context)
       // Blueprint is generated before design.md so the design call can use the blueprint's page_title and sections.
       // Skipped in Blueprinter mode (no blueprint.json needed).
-      if (!isBlueprinter) {
+      if (!isBlueprinter || generateBlueprint) {
       setPhase('llm-blueprint', 'Generating page blueprint JSON with Claude...', 45);
       // FIX 2: trace — confirm the full design.md reaches the blueprint call (design.md is generated later,
       // but the blueprint call itself does NOT consume design.md; it consumes cleanedHtml + assetManifestText.
@@ -622,7 +625,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       if (provenanceLine) {
         designMd = `> ${provenanceLine}\n\n${designMd}`;
-        if (!isBlueprinter) {
+        if (blueprintJson) {
           try {
             const bpParsedProv = JSON.parse(blueprintJson);
             bpParsedProv._provenance = provenanceLine;
@@ -1028,6 +1031,27 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           </div>
         )}
         {outputMode === 'blueprinter' && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <label className="flex items-start space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={generateBlueprint}
+                onChange={e => setGenerateBlueprint(e.target.checked)}
+                disabled={isRunning}
+                className="w-4 h-4 mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Generar lista de secciones para el editor
+                <span className="block text-xs text-gray-500 mt-0.5">
+                  Añade una llamada a Claude por extracción. Actívalo si quieres corregir la estructura a mano
+                  en el editor de abajo.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
+        {outputMode === 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
             <p className="text-sm font-medium text-gray-700">¿De dónde tomar las imágenes?</p>
             <div className="space-y-2">
@@ -1183,9 +1207,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       {/* Section editor — available with or without an extraction */}
       <SectionEditorPanel
-        blueprintJson={result ? result.blueprintJson : manualBlueprint}
+        blueprintJson={result && result.blueprintJson.trim() ? result.blueprintJson : manualBlueprint}
         onChange={json => {
-          if (result) {
+          if (result && result.blueprintJson.trim()) {
             setResult(prev => (prev ? { ...prev, blueprintJson: json } : prev));
           } else {
             setManualBlueprint(json);
