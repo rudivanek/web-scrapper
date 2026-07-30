@@ -34,6 +34,7 @@ interface ExtractionResult {
   designMd: string;
   blueprintJson: string;
   buildMd: string | null;
+  designMdIncomplete: boolean;
   buildMdIncomplete: boolean;
   buildMdHighAssumption: boolean;
   assumptionRatio: number;
@@ -609,7 +610,24 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // In Blueprinter mode, design.md is generated without blueprint context.
       setPhase('llm-design', 'Generating design.md with Claude...', 70);
       const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, isBlueprinter ? undefined : blueprintJson, cssLooksInsufficient);
-      let designMd = await callClaude(apiKey, DESIGN_SYSTEM_PROMPT, designUserPrompt, 8000, designScreenshotSegments.length > 0 ? designScreenshotSegments : undefined);
+      // design.md ends with the full :root token block — the single most useful part for a
+      // builder — so a plain 8000-token call silently cut it off mid-line on longer sites.
+      // Use the same continuation mechanism the BUILD.md calls already use, and surface it
+      // when even that runs out.
+      let designMdIncomplete = false;
+      const designRes = await callWithContinuation(
+        apiKey,
+        DESIGN_SYSTEM_PROMPT,
+        designUserPrompt,
+        16000,
+        designScreenshotSegments.length > 0 ? designScreenshotSegments : undefined,
+        'design.md',
+      );
+      let designMd = designRes.text;
+      if (designRes.truncated) {
+        console.warn('[design.md] truncated after continuations (stop_reason=max_tokens)');
+        designMdIncomplete = true;
+      }
       console.log(`[pipeline] design.md generated: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
 
       // Provenance injection
@@ -869,7 +887,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
       if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
@@ -1381,6 +1399,17 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               filename={`${site}-design.md`}
               downloadMime="text/markdown"
             />
+          )}
+
+          {/* design.md truncation notice */}
+          {result.designMdIncomplete && (
+            <div className="flex items-start space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                Advertencia: design.md quedó incompleto — la respuesta se cortó por límite de longitud.
+                Revisa el final del archivo (normalmente el bloque <code>:root</code>) antes de enviarlo a un builder.
+              </span>
+            </div>
           )}
 
           {/* Blueprint JSON output — hidden in single-file mode */}
