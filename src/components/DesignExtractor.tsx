@@ -13,6 +13,8 @@ import {
 import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
 import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
+
+type BuilderFormat = 'html' | 'react';
 import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
@@ -278,7 +280,7 @@ function OutputPanel({
 
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
-  outputMode, copyMd, imagesMd, designMd, copyMode, siteName,
+  outputMode, copyMd, imagesMd, designMd, copyMode, siteName, builderFormat, onFormatChange,
 }: {
   buildMd: string | null;
   blueprintJson: string;
@@ -292,16 +294,20 @@ function VibePromptPanel({
   designMd: string;
   copyMode: 'scrape' | 'lorem';
   siteName: string;
+  builderFormat: BuilderFormat;
+  onFormatChange: (f: BuilderFormat) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const outputTarget: BuildOutputTarget = builderFormat === 'react' ? 'react-tailwind' : 'plain-html';
+
   const prompt = outputMode === 'blueprinter' && copyMd && designMd
-    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem')
+    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem', builderFormat)
     : buildVibePrompt(
         vibeTarget,
         { buildMd: buildMd ?? '', blueprintJson, provenance },
-        buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html',
+        outputTarget,
       );
 
   return (
@@ -364,6 +370,33 @@ function VibePromptPanel({
             ))}
           </div>
         </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">Formato de salida del builder</label>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => onFormatChange('html')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                builderFormat === 'html'
+                  ? 'border-gray-900 bg-gray-900 text-white'
+                  : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <span className={`w-3 h-3 rounded-full border ${builderFormat === 'html' ? 'border-white bg-white' : 'border-gray-400'}`} />
+              {'HTML único (un solo archivo)'}
+            </button>
+            <button
+              onClick={() => onFormatChange('react')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                builderFormat === 'react'
+                  ? 'border-gray-900 bg-gray-900 text-white'
+                  : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <span className={`w-3 h-3 rounded-full border ${builderFormat === 'react' ? 'border-white bg-white' : 'border-gray-400'}`} />
+              {'React + Tailwind'}
+            </button>
+          </div>
+        </div>
         {outputMode === 'blueprinter' && (
           <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800">
             <strong>Importante:</strong> Debes adjuntar tu propia captura de pantalla de inspiración al builder. En modo Blueprinter, la app no suministra captura — la captura provee el layout y la composición visual que design.md y copy.md no pueden transmitir.
@@ -399,6 +432,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
   const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('blueprinter');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
+  const [builderFormat, setBuilderFormat] = useState<BuilderFormat>('html');
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
   const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
@@ -1444,6 +1478,8 @@ ${result.blueprintJson}
               designMd={result.designMd}
               copyMode={copyMode}
               siteName={site}
+              builderFormat={builderFormat}
+              onFormatChange={setBuilderFormat}
             />
           )}
         </div>

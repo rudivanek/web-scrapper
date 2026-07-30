@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.18 | Last Updated: 2026-07-29T00:00:00Z -->
+<!-- Version: 8.19 | Last Updated: 2026-07-30T00:00:00Z -->
 
 ---
 
@@ -2024,6 +2024,43 @@ A short pleasant chime plays when an extraction run finishes, so the user doesn'
 The sound fires once at the end of the run — not on each phase. On success it plays right after the output files are ready and results are shown; on failure it plays right after the error message is set. The entire audio helper is wrapped in try/catch — audio never throws or blocks the pipeline. Since the user clicked "Extract Design" to start the run, the prior user interaction required by some browsers has already happened, so playback at completion is allowed.
 
 A mute toggle (speaker icon) appears near the results. Default ON. When muted, no sound plays on success or error. The preference is kept in component state.
+
+#### Builder Output Format Toggle (2026-07-30)
+
+**Added:** 2026-07-30 — A new "FORMATO DE SALIDA DEL BUILDER" toggle appears in the "Prompt para builder" panel, directly below the platform selector. It offers two options:
+
+- **(•) HTML único (un solo archivo)** — default
+- **( ) React + Tailwind**
+
+The toggle is stored as `builderFormat: 'html' | 'react'` (default `'html'`). It is **independent** of the platform selector — every platform × every format produces a coherent prompt. For example, platform=Lovable + format=html produces a Lovable-flavored prompt that asks for a single HTML file.
+
+**HTML format branch** (`'html'`):
+- Output: ONE `index.html` file that works opened directly in a browser — no server, no build step, no framework, no CDN stylesheets.
+- All CSS goes in a single `<style>` block inside `<head>`. Design.md's tokens go in a `:root` block at the top of the `<style>`, referenced via CSS variables throughout (e.g. `color: var(--brand)`). No Tailwind utility classes.
+- Fonts loaded via `<link>` tags in `<head>`.
+- Semantic HTML (`<header>`, `<main>`, `<section>`, `<footer>`, `<nav>`, `<article>`), hand-written CSS.
+- Any JavaScript goes in a single `<script>` at the end of `<body>`.
+
+**React format branch** (`'react'`):
+- The existing React/Tailwind framing (tailwind config, component files, theme extension) — unchanged.
+
+In Blueprinter mode, the same format toggle applies: `buildBlueprinterPrompt` now accepts a `builderFormat` parameter and injects the matching OUTPUT FORMAT section into the three-input prompt (design.md + copy.md + screenshot), with the attach-your-screenshot note preserved.
+
+#### Files Changed
+
+| File | Changes |
+|---|---|
+| `src/lib/vibePrompt.ts` | `buildOutputFormatNote` rewritten with detailed HTML-único instructions (semantic HTML, `:root` tokens, no Tailwind, `<link>` fonts, single `<script>`); `buildBlueprinterPrompt` now accepts `builderFormat` param and injects format-specific OUTPUT FORMAT section |
+| `src/components/DesignExtractor.tsx` | Added `BuilderFormat` type; `builderFormat` state (default `'html'`); `VibePromptPanel` accepts `builderFormat` + `onFormatChange` props and derives `outputTarget` from format; FORMATO DE SALIDA DEL BUILDER toggle UI with radio-style buttons below platform selector |
+
+#### What Did NOT Change
+
+- The Blueprinter pipeline (three-input framing, screenshot note)
+- The platform targets (Lovable, Bolt, v0, Claude Design, Replit, Generic)
+- The fidelity rules (exact images, exact copy, exact sections, no placeholders)
+- The copy-to-clipboard and download-.md buttons
+
+---
 
 #### Replit Target (2026-07-30)
 

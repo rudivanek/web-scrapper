@@ -245,9 +245,9 @@ function formatContracts(contracts: string[]): string {
 
 function buildOutputFormatNote(target: BuildOutputTarget): string {
   if (target === 'plain-html') {
-    return `\n## OUTPUT FORMAT\nProduce a single self-contained HTML file. Include a \`<style>\` block with a \`:root\` section for design tokens (CSS custom properties). Do not use Tailwind, React, or any build step. Inline all CSS in a <style> tag.`;
+    return `\n## OUTPUT FORMAT (HTML único)\nProduce ONE self-contained \`index.html\` file that works opened directly in a browser (no server, no build step).\n- ALL CSS goes in a single \`<style>\` block inside \`<head>\`. Do NOT use Tailwind, React, or any framework. Do NOT link external stylesheets (no CDN stylesheets).\n- Put design.md's tokens in a \`:root\` block at the top of the \`<style>\` and reference those CSS variables throughout (e.g. \`color: var(--brand)\`). Do NOT use Tailwind utility classes.\n- Load fonts via \`<link>\` tags in \`<head>\` (Google Fonts or the original font CDN). No other external stylesheets.\n- Write semantic HTML: \`<header>\`, \`<main>\`, \`<section>\`, \`<footer>\`, \`<nav>\`, \`<article>\`.\n- Hand-write all CSS — no preprocessor, no utility framework.\n- Any JavaScript goes in a single \`<script>\` at the end of \`<body>\`.`;
   }
-  return `\n## OUTPUT FORMAT\nProduce a React + Tailwind CSS project. Provide a \`tailwind.config.js\` with the theme extension from the spec, and component files for each section. Use the CSS custom properties from the :root block as Tailwind theme values.`;
+  return `\n## OUTPUT FORMAT (React + Tailwind)\nProduce a React + Tailwind CSS project. Provide a \`tailwind.config.js\` with the theme extension from the spec, and component files for each section. Use the CSS custom properties from the :root block as Tailwind theme values.`;
 }
 
 function buildLovablePrompt(input: VibePromptInput, target: BuildOutputTarget): string {
@@ -505,7 +505,7 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
 
 // ─── Blueprinter prompt (design.md + copy.md + user screenshot) ───────────────
 
-export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean): string {
+export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html'): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
 
   const imagesSection = imagesMd
@@ -515,6 +515,10 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
   const loremWarning = isLorem
     ? '\n\nIMPORTANT: The copy is Lorem Ipsum placeholder — use it to render the layout, but it is NOT real content. Do not treat it as meaningful text.'
     : '';
+
+  const formatNote = builderFormat === 'html'
+    ? `\n\n## OUTPUT FORMAT (HTML único)\nProduce ONE self-contained \`index.html\` file that works opened directly in a browser (no server, no build step).\n- ALL CSS goes in a single \`<style>\` block inside \`<head>\`. Do NOT use Tailwind, React, or any framework. Do NOT link external stylesheets (no CDN stylesheets).\n- Put design.md's tokens in a \`:root\` block at the top of the \`<style>\` and reference those CSS variables throughout. Do NOT use Tailwind utility classes.\n- Load fonts via \`<link>\` tags in \`<head>\`.\n- Write semantic HTML (\`<header>\`, \`<main>\`, \`<section>\`, \`<footer>\`, \`<nav>\`). Hand-write all CSS.\n- Any JavaScript goes in a single \`<script>\` at the end of \`<body>\`.`
+    : `\n\n## OUTPUT FORMAT (React + Tailwind)\nProduce a React + Tailwind CSS project. Provide a \`tailwind.config.js\` with the theme extension from design.md, and component files for each section. Use the CSS custom properties from the :root block as Tailwind theme values.`;
 
   return `# Rebuild Prompt — ${targetLabel} (Blueprinter mode)
 
@@ -527,7 +531,7 @@ Build a web page from four inputs, each with one job:
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
-IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${loremWarning}
+IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${loremWarning}${formatNote}
 
 ---
 
