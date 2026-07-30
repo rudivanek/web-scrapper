@@ -610,4 +610,3 @@ export function SectionCard({
 }
 
 
-export { SectionCard }
