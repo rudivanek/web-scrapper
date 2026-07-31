@@ -449,6 +449,10 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   // section editor has the crawled structure to edit. Off by default — costs one extra Claude call.
   const [generateBlueprint, setGenerateBlueprint] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // Supply a design.md instead of extracting one. Skips the design.md Claude call entirely —
+  // the client's own site still provides copy, images and structure.
+  const [designSource, setDesignSource] = useState<'extract' | 'own'>('extract');
+  const [ownDesignMd, setOwnDesignMd] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const resolvedKey = localApiKey || anthropicKey || null;
@@ -638,13 +642,23 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       // Phase 5: LLM Call B — design.md (from design source A, with B's blueprint as context)
       // In Blueprinter mode, design.md is generated without blueprint context.
+      const useOwnDesign = designSource === 'own' && ownDesignMd.trim().length > 0;
+      let designMd: string;
+      let designMdIncomplete = false;
+
+      if (useOwnDesign) {
+        // No extraction, no Claude call. The supplied file is passed through verbatim —
+        // the builder prompt embeds design.md without parsing it, so any format works.
+        setPhase('llm-design', 'Usando tu design.md (sin extracción)...', 70);
+        designMd = ownDesignMd.trim();
+        console.log(`[pipeline] design.md supplied by user: ${designMd.length} chars — extraction skipped`);
+      } else {
       setPhase('llm-design', 'Generating design.md with Claude...', 70);
       const designUserPrompt = buildDesignUserPrompt(combinedCss, platform, frequency, tailwind, isBlueprinter ? undefined : blueprintJson, cssLooksInsufficient);
       // design.md ends with the full :root token block — the single most useful part for a
       // builder — so a plain 8000-token call silently cut it off mid-line on longer sites.
       // Use the same continuation mechanism the BUILD.md calls already use, and surface it
       // when even that runs out.
-      let designMdIncomplete = false;
       const designRes = await callWithContinuation(
         apiKey,
         DESIGN_SYSTEM_PROMPT,
@@ -653,12 +667,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
         designScreenshotSegments.length > 0 ? designScreenshotSegments : undefined,
         'design.md',
       );
-      let designMd = designRes.text;
+      designMd = designRes.text;
       if (designRes.truncated) {
         console.warn('[design.md] truncated after continuations (stop_reason=max_tokens)');
         designMdIncomplete = true;
       }
       console.log(`[pipeline] design.md generated: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
+      }
 
       // Provenance injection
       let provenanceLine: string | null = null;
@@ -669,6 +684,9 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
       if (isBlueprinter && dual) {
         provenanceLine = `Diseño: ${designUrl}. Texto: ${structUrl}.`;
+      }
+      if (useOwnDesign) {
+        provenanceLine = `Diseño: design.md propio (no extraído). Texto: ${structUrl}.`;
       }
 
       if (provenanceLine) {
@@ -1025,6 +1043,53 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       {/* Input */}
       <div className="mb-8 space-y-3">
+        {/* Design system source */}
+        {outputMode === 'blueprinter' && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+            <p className="text-sm font-medium text-gray-700">¿De dónde viene el sistema de diseño?</p>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                checked={designSource === 'extract'}
+                onChange={() => setDesignSource('extract')}
+                disabled={isRunning}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-gray-700">Extraerlo de la URL de diseño — por defecto</span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                checked={designSource === 'own'}
+                onChange={() => setDesignSource('own')}
+                disabled={isRunning}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-gray-700">Usar mi propio design.md</span>
+            </label>
+
+            {designSource === 'own' && (
+              <div className="pt-1">
+                <textarea
+                  value={ownDesignMd}
+                  onChange={e => setOwnDesignMd(e.target.value)}
+                  disabled={isRunning}
+                  rows={6}
+                  className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-xs font-mono text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 transition-colors resize-y"
+                  placeholder="Pega aquí tu design.md. Cualquier formato sirve — se pasa al builder tal cual, sin procesar."
+                />
+                <p className="text-xs text-gray-500 mt-1.5">
+                  {ownDesignMd.trim()
+                    ? `${ownDesignMd.trim().length.toLocaleString()} caracteres. Se omite la extracción de diseño (una llamada a Claude menos).`
+                    : 'Si lo dejas vacío se extraerá el diseño de la URL como siempre.'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  El texto, las imágenes y la estructura siguen saliendo del sitio que indiques abajo.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
         <div>
           <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">URL de diseño</label>
           <div className="flex gap-3">
