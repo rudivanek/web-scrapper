@@ -510,6 +510,17 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
  * and the layout_contract rules. Returns '' when there is no usable blueprint, so
  * the prompt stays byte-identical to its pre-blueprint form.
  */
+/** The URL the structure and copy came from — the page whose screenshot the builder needs. */
+function blueprintSourceUrl(blueprintJson?: string): string {
+  if (!blueprintJson || !blueprintJson.trim()) return '';
+  try {
+    const bp = JSON.parse(blueprintJson) as { url?: unknown };
+    return typeof bp?.url === 'string' ? bp.url : '';
+  } catch {
+    return '';
+  }
+}
+
 function formatBlueprintForPrompt(blueprintJson?: string): string {
   if (!blueprintJson || !blueprintJson.trim()) return '';
   let bp: { sections?: unknown };
@@ -553,6 +564,13 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
 
   const blueprintBlock = formatBlueprintForPrompt(blueprintJson);
+  // In dual-URL mode the design comes from one site and the structure/copy from another.
+  // Screenshotting the design site yields that site's layout wearing this site's words —
+  // the cross-site mix that does not work. Name the right page explicitly.
+  const sourceUrl = blueprintSourceUrl(blueprintJson);
+  const screenshotTarget = sourceUrl
+    ? ` Screenshot THIS page: ${sourceUrl} — it is the page this structure and copy came from. Do not use a screenshot of the design-reference site.`
+    : '';
   const hasBlueprint = blueprintBlock !== '';
   const inputCount = hasBlueprint ? 'five' : 'four';
   const blueprintInput = hasBlueprint
@@ -585,7 +603,7 @@ Build a web page from ${inputCount} inputs, each with one job:
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
-IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${loremWarning}${formatNote}
+IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${screenshotTarget}${loremWarning}${formatNote}
 
 ---
 

@@ -1560,7 +1560,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           )}
 
           {/* BUILD.md generation failed notice */}
-          {result.buildTarget === 'react-tailwind' && !result.buildMd && (
+          {result.outputMode !== 'blueprinter' && result.buildTarget === 'react-tailwind' && !result.buildMd && (
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>BUILD.md no pudo generarse — design.md y blueprint.json están disponibles.</span>
