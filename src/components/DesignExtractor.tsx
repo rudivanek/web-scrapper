@@ -19,6 +19,8 @@ import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
+import { detectFabricatedText } from '../lib/fabricationCheck';
+import type { FabricationFinding } from '../lib/fabricationCheck';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +38,7 @@ interface ExtractionResult {
   buildMd: string | null;
   designMdIncomplete: boolean;
   blueprintIncomplete: boolean;
+  fabricationFindings: FabricationFinding[];
   buildMdIncomplete: boolean;
   buildMdHighAssumption: boolean;
   assumptionRatio: number;
@@ -912,7 +915,15 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       }
 
       setPhase('done', 'Extraction complete.', 100);
-      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      // Fabrication check: every string in the blueprint should appear in the scraped copy.
+      // Skipped for lorem/placeholder modes, where non-verbatim text is the point.
+      const fabricationFindings = copyMode === 'lorem'
+        ? []
+        : detectFabricatedText(blueprintJson, copyMd ?? '');
+      if (fabricationFindings.length > 0) {
+        console.warn(`[fabrication] ${fabricationFindings.length} blueprint string(s) not found in copy.md`, fabricationFindings);
+      }
+      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
       if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
@@ -1424,6 +1435,33 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               filename={`${site}-design.md`}
               downloadMime="text/markdown"
             />
+          )}
+
+          {/* fabrication check */}
+          {result.fabricationFindings.length > 0 && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-start space-x-2 mb-3">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                <div>
+                  <p className="text-sm font-semibold text-red-800">
+                    Texto no encontrado en la página ({result.fabricationFindings.length})
+                  </p>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    Estas frases están en la lista de secciones pero no aparecen en copy.md. Probablemente
+                    fueron inventadas por la IA. Verifícalas contra el sitio real antes de entregar.
+                  </p>
+                </div>
+              </div>
+              <ul className="space-y-1.5">
+                {result.fabricationFindings.map((f, i) => (
+                  <li key={i} className="text-xs text-red-800 bg-white border border-red-200 rounded px-2.5 py-1.5">
+                    <span className="font-medium">#{f.sectionIndex} {f.sectionName}</span>
+                    <span className="text-red-500"> · {f.field}</span>
+                    <span className="block mt-0.5 text-gray-700">"{f.text}"</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/* blueprint truncation / invalid JSON notice */}
