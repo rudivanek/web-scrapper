@@ -510,6 +510,17 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
  * and the layout_contract rules. Returns '' when there is no usable blueprint, so
  * the prompt stays byte-identical to its pre-blueprint form.
  */
+/** Free-text layout instructions the user typed in the section editor, if any. */
+function blueprintInstructions(blueprintJson?: string): string {
+  if (!blueprintJson || !blueprintJson.trim()) return '';
+  try {
+    const bp = JSON.parse(blueprintJson) as { user_instructions?: unknown };
+    return typeof bp?.user_instructions === 'string' ? bp.user_instructions.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 /** The URL the structure and copy came from — the page whose screenshot the builder needs. */
 function blueprintSourceUrl(blueprintJson?: string): string {
   if (!blueprintJson || !blueprintJson.trim()) return '';
@@ -567,12 +578,21 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
   // In dual-URL mode the design comes from one site and the structure/copy from another.
   // Screenshotting the design site yields that site's layout wearing this site's words —
   // the cross-site mix that does not work. Name the right page explicitly.
+  const instructions = blueprintInstructions(blueprintJson);
+  const hasInstructions = instructions !== '';
+  const instructionsInput = hasInstructions
+    ? `\n6. LAYOUT CHANGES — from "Requested layout changes" below. These are deliberate changes the user wants to the structure. They OVERRIDE the section list and the screenshot wherever they conflict. Apply them; do not treat them as suggestions.`
+    : '';
+  const instructionsSection = hasInstructions
+    ? `\n\n---\n\n## Requested layout changes (highest priority)\n\nThe section list above describes the page as it currently exists. The instructions below are changes the user wants instead. Where they conflict with a section's layout, columns, MUST PRESERVE or DO NOT rules, follow these instructions and ignore the conflicting rule. Everything not mentioned here stays as the section list describes.\n\n${instructions}`
+    : '';
+
   const sourceUrl = blueprintSourceUrl(blueprintJson);
   const screenshotTarget = sourceUrl
     ? ` Screenshot THIS page: ${sourceUrl} — it is the page this structure and copy came from. Do not use a screenshot of the design-reference site.`
     : '';
   const hasBlueprint = blueprintBlock !== '';
-  const inputCount = hasBlueprint ? 'five' : 'four';
+  const inputCount = hasInstructions ? 'six' : (hasBlueprint ? 'five' : 'four');
   const blueprintInput = hasBlueprint
     ? `\n5. SECTION ORDER & LAYOUT RULES — from the section list below. Build the sections in exactly this order. For each section, treat MUST PRESERVE as mandatory and DO NOT as forbidden. Where the section list and the screenshot disagree about layout, follow the section list.`
     : '';
@@ -599,7 +619,7 @@ Build a web page from ${inputCount} inputs, each with one job:
 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 2. DESIGN SYSTEM — from design.md below. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
 3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
-4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}
+4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}${instructionsInput}
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
@@ -619,7 +639,7 @@ ${designMd}
 
 \`\`\`markdown
 ${copyMd}
-\`\`\`${imagesSection}${blueprintSection}`;
+\`\`\`${imagesSection}${blueprintSection}${instructionsSection}`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────

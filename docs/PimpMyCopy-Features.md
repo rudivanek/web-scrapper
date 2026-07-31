@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.20 | Last Updated: 2026-07-31T00:00:00Z -->
+<!-- Version: 8.21 | Last Updated: 2026-07-31T12:00:00Z -->
 
 ---
 
@@ -2539,3 +2539,69 @@ The key was typed into a modal on every session, held in component state, and wr
 - **`BuildOutputTarget` is referenced but not defined** (`DesignExtractor.tsx`, TS2304) — one of three standing pre-existing errors, and the only genuinely broken reference rather than an unused variable. Worth tracing before it bites at runtime.
 - **`setOutputMode` is never called**, so `outputMode` is permanently `'blueprinter'`. The `'full'` mode (BUILD.md generation) is unreachable. Restoring the selector is a product decision.
 - **copy.md flattens footer columns.** The blueprint reports multiple footer columns; copy.md merges them into a single list. Needs the real `<footer>` outerHTML to fix safely.
+
+---
+
+## Section Editor — Free-text Layout Instructions
+
+**Added:** 2026-07-31
+
+Adds an "Instrucciones de layout" textarea to the section editor panel. The user writes plain-language layout changes ("Hero a 3 columnas, col 1 imagen, col 2 copy") and they reach the builder prompt at the highest priority, overriding the extracted section list wherever they conflict.
+
+### Key Design Decisions
+
+**Storage in the blueprint envelope, not the section schema.** The instructions are stored as `user_instructions` on the blueprint's top-level envelope object. The envelope already round-trips through save, download, localStorage persistence, and restore — this needed no new plumbing anywhere. Rule 3 from the spec is satisfied: no new field was added to the section schema in `src/types/sections.ts`.
+
+**Explicit conflict rule.** The section list describes the page as it currently exists; the instructions describe what the user wants instead. Without an explicit override clause, the builder receives contradictory orders (e.g. "MUST PRESERVE: single-column hero" alongside "make the hero 3 columns") and picks arbitrarily. The injected prompt section states plainly: where these instructions conflict with a section's layout, columns, MUST PRESERVE or DO NOT rules, follow the instructions and ignore the conflicting rule.
+
+**Byte-identical output when the box is empty.** `blueprintInstructions()` returns an empty string for a missing or whitespace-only field. The three prompt interpolation points (`instructionsInput`, `instructionsSection`, and the `inputCount` calculation) all short-circuit to empty string / the prior value when `hasInstructions` is false — no structural change reaches the prompt.
+
+### Files Changed (exactly three)
+
+| File | Change |
+|---|---|
+| `src/hooks/useBlueprintSections.ts` | `instructions` derived from `envelope.user_instructions`; `setInstructions` callback writes/deletes the field and fires `onChange`; both added to the return object |
+| `src/components/section-editor/SectionEditorPanel.tsx` | Destructures `instructions` and `setInstructions`; renders the textarea block above the section list |
+| `src/lib/vibePrompt.ts` | `blueprintInstructions()` helper; `hasInstructions` / `instructionsInput` / `instructionsSection` computed vars; `inputCount` now returns `'six'` when instructions are present; `instructionsInput` appended to the inputs list; `instructionsSection` appended to the prompt body |
+
+### Prompt Shape When Instructions Are Present
+
+```
+You are a senior front-end developer … six inputs:
+1. …
+2. …
+3. …
+4. … Never invent or hotlink images not listed here.
+5. BLUEPRINT JSON …
+6. LAYOUT CHANGES — from "Requested layout changes" below. These are deliberate changes
+   the user wants to the structure. They OVERRIDE the section list and the screenshot
+   wherever they conflict. Apply them; do not treat them as suggestions.
+
+---
+
+## Blueprint JSON
+…
+
+---
+
+## Images
+…
+
+---
+
+## Requested layout changes (highest priority)
+
+The section list above describes the page as it currently exists. The instructions below
+are changes the user wants instead. Where they conflict with a section's layout, columns,
+MUST PRESERVE or DO NOT rules, follow these instructions and ignore the conflicting rule.
+Everything not mentioned here stays as the section list describes.
+
+Hero a 3 columnas — col 1 imagen, col 2 copy, col 3 formulario.
+CTA a ancho completo.
+Quitar la galería de equipo.
+```
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero errors in the three modified files.
+- `npm run build`: succeeded, exit 0.

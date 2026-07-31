@@ -76,6 +76,26 @@ export function useBlueprintSections(
     emit([...sections.slice(0, idx + 1), cloned, ...sections.slice(idx + 1)]);
   }, [sections, emit]);
 
+  /**
+   * Free-text layout instructions from the user, stored in the blueprint envelope so they
+   * persist, download and restore alongside the sections with no extra plumbing.
+   */
+  const instructions = typeof envelope.user_instructions === 'string' ? envelope.user_instructions : '';
+
+  const setInstructions = useCallback((text: string) => {
+    const nextEnvelope = { ...envelope };
+    if (text.trim()) {
+      nextEnvelope.user_instructions = text;
+    } else {
+      delete nextEnvelope.user_instructions;
+    }
+    setEnvelope(nextEnvelope);
+    setDirty(true);
+    const json = serializeBlueprint(nextEnvelope, sections);
+    lastEmitted.current = json;
+    onChange?.(json);
+  }, [envelope, sections, onChange]);
+
   const toJson = useCallback(
     () => serializeBlueprint(envelope, sections),
     [envelope, sections],
@@ -84,6 +104,8 @@ export function useBlueprintSections(
   return {
     sections,
     envelope,
+    instructions,
+    setInstructions,
     parseError,
     dirty,
     addSection,

@@ -29,7 +29,7 @@ export function SectionEditorPanel({
   const [copied, setCopied] = useState(false);
 
   const {
-    sections, parseError, dirty,
+    sections, parseError, dirty, instructions, setInstructions,
     addSection, updateSection, deleteSection, moveSection, duplicateSection, toJson,
   } = useBlueprintSections(blueprintJson, onChange);
 
@@ -198,6 +198,28 @@ export function SectionEditorPanel({
               </span>
             </div>
           )}
+
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-3.5 py-2.5 bg-gray-50 border-b border-gray-200">
+              <p className="text-xs font-medium text-gray-700">Instrucciones de layout</p>
+              <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                Cambios que quieres sobre la estructura extraída. El builder les da prioridad por encima
+                del layout original.
+              </p>
+            </div>
+            <textarea
+              value={instructions}
+              onChange={e => setInstructions(e.target.value)}
+              rows={4}
+              className="w-full border-0 px-3.5 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none resize-y"
+              placeholder={'Ejemplo:\nHero a 3 columnas — col 1 imagen, col 2 copy, col 3 formulario.\nCTA a ancho completo.\nQuitar la galería de equipo.'}
+            />
+            {instructions.trim() && (
+              <p className="px-3.5 pb-2.5 text-[11px] text-gray-400">
+                Se incluirán en el prompt para builder.
+              </p>
+            )}
+          </div>
 
           {sections.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
