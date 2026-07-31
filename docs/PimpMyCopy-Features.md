@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.22 | Last Updated: 2026-07-31T13:00:00Z -->
+<!-- Version: 8.23 | Last Updated: 2026-07-31T14:00:00Z -->
 
 ---
 
@@ -2662,4 +2662,33 @@ Quitar la galería de equipo.
 ### Typecheck / Build
 
 - `npm run typecheck`: 17 errors, all pre-existing. Zero errors in the three modified files.
+- `npm run build`: succeeded, exit 0.
+
+---
+
+## DesignExtractor — Label and Conditional Display Fixes
+
+**Added:** 2026-07-31
+
+Five display-only corrections to `DesignExtractor.tsx`. No logic, extraction, or prompt changes.
+
+### What Was Wrong
+
+- **"URL de diseño"** was wrong when "Usar mi propio design.md" is selected — in that mode no design is extracted from the URL.
+- **Copy URL placeholder** said "Vacío = usar la URL de diseño", compounding the confusion.
+- **"¿De dónde tomar las imágenes?"** showed a radio group with one option when there was only one URL.
+- **The phase checklist was hardcoded**, always reading "Phase 3 — Generate design.md (Claude)" even when skipped.
+
+### Fixes
+
+| Edit | Change |
+|---|---|
+| 1 | Main URL label switches to "URL a extraer (texto, imágenes y estructura)" when `designSource === 'own'` |
+| 2 | Copy URL placeholder reads "Vacío = usar la URL de arriba" |
+| 3–4 | Images: `!isDualUrl && !fillUnsplash` shows a sentence instead of a one-option radio group |
+| 5 | Phase checklist replaced with `blueprinterSteps` IIFE — only active steps, numbered continuously; reflects `generateBlueprint` and `designSource` |
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
 - `npm run build`: succeeded, exit 0.

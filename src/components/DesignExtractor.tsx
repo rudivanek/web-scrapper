@@ -960,22 +960,33 @@ export function DesignExtractor() {
   const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
   const site = hostname(structureUrl.trim() || url);
 
+  // The Blueprinter phase list is built from the options actually in play, so it matches
+  // what really runs: the blueprint step only appears when it is switched on, and the
+  // design.md step says whether it is generated or supplied.
+  const blueprinterSteps: Array<{ key: ExtractionState['phase']; text: string }> = (() => {
+    const steps: Array<{ key: ExtractionState['phase']; text: string }> = [];
+    if (isDualUrl) {
+      steps.push({ key: 'scrape-design', text: 'Scrape design source (URL A)' });
+      steps.push({ key: 'scrape-structure', text: 'Scrape copy source (URL B)' });
+      steps.push({ key: 'fetch-css', text: 'Fetch external stylesheets (URL A)' });
+    } else {
+      steps.push({ key: 'scrape-structure', text: 'Scrape page (rawHtml + screenshot)' });
+      steps.push({ key: 'fetch-css', text: 'Fetch external stylesheets' });
+    }
+    if (generateBlueprint) {
+      steps.push({ key: 'llm-blueprint', text: 'Generate section list (Claude)' });
+    }
+    steps.push({
+      key: 'llm-design',
+      text: designSource === 'own' ? 'Use your own design.md (no Claude call)' : 'Generate design.md (Claude)',
+    });
+    steps.push({ key: 'done', text: 'Extract copy.md + images.md (deterministic)' });
+    return steps;
+  })();
+
   const phases: Array<{ key: ExtractionState['phase']; label: string }> =
     outputMode === 'blueprinter'
-      ? isDualUrl
-        ? [
-            { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
-            { key: 'scrape-structure', label: 'Phase 2 — Scrape copy source (URL B)' },
-            { key: 'fetch-css', label: 'Phase 3 — Fetch external stylesheets (URL A)' },
-            { key: 'llm-design', label: 'Phase 4 — Generate design.md (Claude)' },
-            { key: 'done', label: 'Phase 5 — Extract copy.md + images.md (deterministic)' },
-          ]
-        : [
-            { key: 'scrape-structure', label: 'Phase 1 — Scrape page (rawHtml + screenshot)' },
-            { key: 'fetch-css', label: 'Phase 2 — Fetch external stylesheets' },
-            { key: 'llm-design', label: 'Phase 3 — Generate design.md (Claude)' },
-            { key: 'done', label: 'Phase 4 — Extract copy.md + images.md (deterministic)' },
-          ]
+      ? blueprinterSteps.map((s, i) => ({ key: s.key, label: `Phase ${i + 1} — ${s.text}` }))
       : isDualUrl
         ? [
             { key: 'scrape-design', label: 'Phase 1 — Scrape design source (URL A)' },
@@ -1068,7 +1079,9 @@ export function DesignExtractor() {
           </div>
         )}
         <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">URL de diseño</label>
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+            {designSource === 'own' ? 'URL a extraer (texto, imágenes y estructura)' : 'URL de diseño'}
+          </label>
           <div className="flex gap-3">
             <input
               type="text"
@@ -1099,7 +1112,7 @@ export function DesignExtractor() {
             value={structureUrl}
             onChange={e => setStructureUrl(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
-            placeholder={outputMode === 'blueprinter' ? (copyMode === 'lorem' ? 'Solo se usa para imágenes si el origen de imágenes es "copy"' : 'De dónde extraer el texto. Vacío = usar la URL de diseño.') : 'Déjalo vacío para usar la misma URL para todo'}
+            placeholder={outputMode === 'blueprinter' ? (copyMode === 'lorem' ? 'Solo se usa para imágenes si el origen de imágenes es "copy"' : 'De dónde extraer el texto. Vacío = usar la URL de arriba.') : 'Déjalo vacío para usar la misma URL para todo'}
             disabled={isRunning || (outputMode === 'blueprinter' && copyMode === 'lorem' && imageSource !== 'copy')}
             className="w-full border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
           />
@@ -1161,7 +1174,13 @@ export function DesignExtractor() {
 
         {outputMode === 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
-            <p className="text-sm font-medium text-gray-700">¿De dónde tomar las imágenes?</p>
+            <p className="text-sm font-medium text-gray-700">Imágenes</p>
+            {!isDualUrl && !fillUnsplash ? (
+              <p className="text-xs text-gray-500">
+                Se toman de {url.trim() ? hostname(url) : 'la URL de arriba'}. Añade una URL de texto/copy
+                si quieres elegir entre dos sitios.
+              </p>
+            ) : (
             <div className="space-y-2">
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input
@@ -1173,7 +1192,9 @@ export function DesignExtractor() {
                   disabled={isRunning}
                   className="w-4 h-4"
                 />
-                <span className="text-sm text-gray-700">De la URL de diseño ({hostname(url)})</span>
+                <span className="text-sm text-gray-700">
+                  {designSource === 'own' ? `De la URL a extraer (${hostname(url)})` : `De la URL de diseño (${hostname(url)})`}
+                </span>
               </label>
               {structureUrl.trim().length > 0 && (
                 <label className="flex items-center space-x-2 cursor-pointer">
@@ -1204,6 +1225,7 @@ export function DesignExtractor() {
                 </label>
               )}
             </div>
+            )}
             <label className="flex items-center space-x-2 cursor-pointer pt-2 border-t border-gray-200">
               <input
                 type="checkbox"
