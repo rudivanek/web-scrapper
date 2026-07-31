@@ -44,14 +44,23 @@ export async function callClaudeWithMeta(
       ]
     : userPrompt;
 
+  // Calls go through the anthropic-proxy edge function so the API key stays in Supabase
+  // secrets and never reaches the browser — same pattern as firecrawl-proxy. The apiKey
+  // parameter is no longer used; it is kept on the signature until the call sites and the
+  // key-entry UI are removed.
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase no está configurado: faltan VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY.');
+  }
+  void apiKey;
+
   const doFetch = (content: unknown) =>
-    fetch('https://api.anthropic.com/v1/messages', {
+    fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
