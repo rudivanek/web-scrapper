@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.19 | Last Updated: 2026-07-30T00:00:00Z -->
+<!-- Version: 8.20 | Last Updated: 2026-07-31T00:00:00Z -->
 
 ---
 
@@ -2378,3 +2378,164 @@ Both are visually minimal — diagnostic signals for the operator, not client-fa
 | `src/lib/supabase.ts` | Added `SitemapGap` interface; added `discovery_method`, `jsspa_manual`, `sitemap_gap` to `Crawl` and `SavedItem` interfaces |
 | `src/components/Crawler.tsx` | Telemetry write in `handleCrawl()` after discovery completes |
 | `src/components/SavedCrawls.tsx` | Discovery method badge + sitemap gap warning indicator on each crawl row |
+
+---
+
+## Design Extractor — Section Editor Port (Blueprint Maker)
+
+**Added:** 2026-07-31
+
+Ported the visual section editor from `blueprint-maker-20260610` into the Design Extractor tab, adding an in-browser editing layer for the blueprint JSON output. The feature is gated behind an opt-in checkbox so it does not appear unless requested. The tab label and panel heading read "Blueprint Maker"; component names and variable names in code are unchanged.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `src/types/sections.ts` | Section schema mirroring `BLUEPRINT_SYSTEM_PROMPT`, plus normalizers, `parseBlueprint`, `serializeBlueprint` |
+| `src/hooks/useBlueprintSections.ts` | In-memory add / update / delete / move / duplicate, re-serializing to blueprint JSON on every edit |
+| `src/components/section-editor/SectionCard.tsx` | Accordion card with Contract / Copy / Bloques / Imágenes tabs |
+| `src/components/section-editor/SectionTemplateModal.tsx` | Template picker with count stepper for repeating sections |
+| `src/components/section-editor/SectionEditorPanel.tsx` | Collapsible host panel with Copy JSON / Descargar buttons |
+| `src/lib/sectionTemplates.ts` | 13 structure-only templates — zero fabricated content |
+| `src/lib/fabricationCheck.ts` | Compares every string in the blueprint against copy.md; lists absent strings as invented |
+| `src/lib/sectionStorage.ts` | localStorage persistence keyed by source URL with a restore bar after reload |
+| `src/components/BlueprintMakerHelpModal.tsx` | Help modal with 15 entries across six groups |
+
+### Modified Files
+
+- `src/components/DesignExtractor.tsx` — mounts the editor panel; opt-in checkbox; blueprint and design.md calls switched to `callWithContinuation`; fabrication check panel; restored-sections guard on crawl; builder prompt page naming fix; `BUILD.md no pudo generarse` warning suppressed in Blueprinter mode
+- `src/lib/vibePrompt.ts` — optional section list injected into the Blueprinter prompt
+- `src/lib/copyExporter.ts` — four export bug fixes (see below)
+- `src/lib/assetExtractor.ts` — `NON_IMAGE_ASSET_RE` filter to reject `@font-face url()` entries misclassified as images
+
+No new dependencies. `package.json` untouched.
+
+### Architectural Decision: Blueprint JSON Is the Data Layer
+
+The blueprint-maker app's `useSections` hook is Supabase-backed and keyed on a `page_id`, requiring `projects → pages → sections` tables. The web-scraper has no page hierarchy — its schema is `crawls / scraped_pages / audits`.
+
+Rather than add a migration, the editor reads and writes directly into `result.blueprintJson`, which the app already produces and which `vibePrompt.ts` already consumes. Consequences:
+
+- No migration, no RLS policy, no new queries.
+- Edits reach the builder prompt for free once `vibePrompt.ts` was wired.
+- Sections live in memory only — a page reload discards them unless localStorage restore is used. Use "Descargar" to keep work permanently.
+
+### What Was Deliberately NOT Ported
+
+**`useSections`** — Supabase-backed; needs tables this app does not have.
+
+**blueprint-maker's `SECTION_TEMPLATES`** — they ship fabricated content (`"Jane Smith, CEO at Acme"`, `"10,000+ Active users"`, `"99.9% Uptime SLA"`, `"$29/month"`). Dropped into a client blueprint these read as extracted fact. The ported templates supply structure only — correct block count, order, and semantic role — with every `content`, `url`, and `text` field empty. Audited: zero non-empty content strings in `sectionTemplates.ts`.
+
+**String-typed `layout_contract` fields** — blueprint-maker types `must_preserve`, `allowed_simplifications`, and `do_not_do` as strings; this app types them as `string[]`. A naive port would throw at runtime. The card edits them through a chip UI; `normalizeLayoutContract` coerces a stray string into a single-item array.
+
+**Drag reorder** — replaced with arrow buttons. `SectionCard` accepted `dragHandleProps` in the source but `EditorPage` never passed it; `reorderSections` was dead code. The `GripVertical` render was dropped.
+
+**Turned to advantage:** several templates carry anti-fabrication rules in `do_not_do` ("Do not invent figures", "Do not invent quotes, names, or company names"). Since `do_not_do` flows into the builder prompt, the field that was a fabrication vector now guards against it.
+
+### Bugs Found and Fixed
+
+#### Pre-existing — copyExporter.ts (affected every deliverable)
+
+| Bug | Effect | Fix |
+|---|---|---|
+| Two `<footer>` elements emitted | Footer appeared twice in copy.md; builders rendered two footers | Deduplicate by content signature |
+| Nested `<li><a><span>` | Same text emitted three times | Claim descendants in `seen`; deduplicate by text |
+| Column heading re-emitted | `#### Contacto` duplicated the real `### Contacto` heading | Mark the heading element as seen |
+| `<br>` has no whitespace in `textContent` | `"Meant<br>To Be"` → `"MeantTo Be"`; `"Experienciade Usuario"`, `"asignados.Es por"` | Clone node and replace `<br>` with a space before reading `textContent` |
+
+Verified before/after on identical HTML and on a live extraction of `sharpen.studio/nosotros`.
+
+#### Pre-existing — DesignExtractor.tsx (silent truncation)
+
+| Bug | Effect | Fix |
+|---|---|---|
+| `@font-face url()` entries classified as images | Font files listed in the image asset manifest | `NON_IMAGE_ASSET_RE` pattern added to `assetExtractor.ts` |
+| design.md at `max_tokens: 8000`, no continuation | File cut mid-word; `:root` token block silently lost | `callWithContinuation` at 16000; `designMdIncomplete` warning |
+| blueprint JSON at `callClaude`, no continuation | Truncated blueprint is invalid JSON; section editor shows nothing; builder prompt silently drops to four inputs | `callWithContinuation` at 16000; `blueprintIncomplete` flag |
+
+The design.md truncation was the worst: on the last good run before the fix, the file grew from ~23 KB to 29 KB. Everything after the cut — spacing tokens, shadows, transitions, z-index — had never reached the builder. Lovable was inventing all of it.
+
+#### Introduced during the port, caught and fixed
+
+- **`onChange` called inside a `setSections(prev => …)` updater.** React updaters must be pure; React may call them twice in Strict Mode, firing the parent's `setState` twice per edit. Not detectable by typecheck. Fixed: renders per edit dropped from 3 to 2.
+- **A crawl wiped hand-built sections.** The panel switched to `result.blueprintJson` the moment a crawl finished, even when the result was empty. Fixed with a `.trim()` guard: the panel only replaces in-memory sections when the incoming blueprint is non-empty.
+
+### Fabrication Check (`src/lib/fabricationCheck.ts`)
+
+Compares every string in the blueprint (headlines, subheadlines, body text, text blocks, CTA labels) against copy.md. Anything absent is listed in a red panel with section name, field, and text.
+
+**Tuning decisions (do not loosen these):**
+- Strings under 12 characters are skipped — too generic to match reliably.
+- Matching is retried whitespace-insensitive before reporting a miss. Line-break differences between scraper and model are far more common than fabrication.
+- Split-paragraph differences are checked sentence by sentence.
+- Returns empty on broken JSON; skipped in lorem/placeholder mode.
+
+**Verified:** zero false positives across two real extractions; 4/4 caught with fabrications injected.
+
+**Limits:** catches text that is not on the page. Does NOT catch text that IS on the page but landed in the wrong section. Says nothing about `layout_contract` — an invented `must_preserve` rule passes through. A floor, not a guarantee.
+
+### Section Persistence (`src/lib/sectionStorage.ts`)
+
+Sections are saved to localStorage after every edit, keyed by source URL. On reload, a restore bar offers the saved state back with a single click.
+
+Rules:
+- A live blueprint always wins — a fresh crawl never silently overrides saved state.
+- Restore is a deliberate click, not automatic.
+- One entry per browser; no history.
+- All calls are wrapped in `try/catch` — `localStorage` throws in private-browsing mode.
+
+### Help Modal (`src/components/BlueprintMakerHelpModal.tsx`)
+
+A `?` button beside the panel heading opens a modal with 15 entries across six groups: what each output file does, what each warning banner means, what the fabrication check catches and misses, when to supply your own design.md, what the section editor saves and when it is lost, and how the builder prompt is assembled from outputs.
+
+### Supply Your Own design.md
+
+A radio at the top of the form: extract the design system from a URL, or paste a ready-made `design.md`. When a file is supplied the design.md Claude call is skipped entirely — the slowest and most expensive call in a run. Copy, images, and structure still come from the client's site. Provenance records: `Diseño: design.md propio (no extraído).`
+
+**Why it works:** in Blueprinter mode the app never parses design.md — it is interpolated verbatim into the builder prompt inside a markdown fence in `vibePrompt.ts`. Any format works, including files this app did not produce.
+
+**Caveat:** files sourced elsewhere may not be honest about what they captured. Files this app produces carry a provenance line; files from elsewhere need a skim before they go on the shelf.
+
+### Builder Prompt Fixes
+
+- **Page naming:** the builder prompt now names the page to screenshot, read from the blueprint's `url` field. In dual-URL mode, screenshotting the design site produces that site's layout wearing this site's words — the fix ensures the correct URL is named explicitly.
+- **`BUILD.md no pudo generarse` suppressed in Blueprinter mode:** BUILD.md is intentionally never produced in this mode. The amber warning was always wrong and was training users to ignore real warnings.
+
+### blueprint.json Panel
+
+The blueprint JSON was previously only downloadable from the section editor header and was gated on `outputMode === 'full'`, which is permanently unreachable while `outputMode` is pinned to `'blueprinter'`. The panel is now gated on the blueprint having content, retitled to match the other output panels, and placed below images.md. The section editor keeps its own Copy JSON / Descargar buttons; both produce the same file (byte-identical — verified by round-trip).
+
+### Screenshot vs Section List — Empirical Finding
+
+Tested on `sharpen.studio/nosotros` (design from `m-rad.com`), the same prompt run through Lovable twice — once with the inspiration screenshot, once without.
+
+**Identical in both builds:** 4 sections in the correct order, all 6 real team photos, grayscale treatment, dark background on section 3, "Ver portafolio" CTA, verbatim copy, zero placeholder images. All of this came from the section list alone.
+
+**The one thing that differed — arrangement:**
+
+| | Section 3 gallery |
+|---|---|
+| No screenshot | Stacked simple rows: `1.35fr 1fr`, `1fr 1fr`, one `span 2` |
+| With screenshot | 12-column grid with explicit placement: `grid-column: 8 / span 5`, `6 / span 6`, per-image classes |
+
+The screenshot build was also smaller (16.3 KB vs 17.7 KB).
+
+**Rule of thumb:** the section list carries the ingredients (which sections, what order, which images, dark or light, grid or not). The screenshot carries the proportions. Keep it for design-led pages with asymmetric layouts — galleries, editorial spreads, anything staggered. This was tested on the hardest case for the section list, so the finding is not evidence that the screenshot is always unnecessary.
+
+### Anthropic API Key — Moved Server-Side
+
+The key was typed into a modal on every session, held in component state, and written to `sessionStorage` — readable by any script on the origin. It also went out as an `x-api-key` header from the browser on every request.
+
+**Fix:** `supabase/functions/anthropic-proxy/index.ts` reads `ANTHROPIC_API_KEY` from `Deno.env.get` and forwards requests to Anthropic. `callClaude.ts` now posts to `/functions/v1/anthropic-proxy`. The dead `apiKey` parameter was dropped from three functions in `callClaude.ts` and all 12 call sites. `ApiKeyModal.tsx` was deleted. The key gate (`if (!resolvedKey) { setShowApiKeyModal(true); return; }`) existed in `DesignExtractor`, `BrandingExtractor`, and the CRO Audit tab — all three are gone.
+
+**`sessionStorage.removeItem('anthropic_api_key')`** survives in App.tsx's reset handler to purge keys left in browsers by the old flow. It is commented so it is not cleaned up as dead code.
+
+**Important:** any key used before this change has been in browser memory, `sessionStorage`, and the DOM. It should be considered compromised and rotated.
+
+**The trap to avoid:** a `VITE_ANTHROPIC_API_KEY` env var. Vite inlines `VITE_`-prefixed variables into the client bundle at build time — same exposure as before, with more confidence and less visibility. Secrets are only safe on the Supabase side.
+
+### Open Items
+
+- **`BuildOutputTarget` is referenced but not defined** (`DesignExtractor.tsx`, TS2304) — one of three standing pre-existing errors, and the only genuinely broken reference rather than an unused variable. Worth tracing before it bites at runtime.
+- **`setOutputMode` is never called**, so `outputMode` is permanently `'blueprinter'`. The `'full'` mode (BUILD.md generation) is unreachable. Restoring the selector is a product decision.
+- **copy.md flattens footer columns.** The blueprint reports multiple footer columns; copy.md merges them into a single list. Needs the real `<footer>` outerHTML to fix safely.
