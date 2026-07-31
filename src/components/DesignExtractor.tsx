@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX, HelpCircle } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot } from '../lib/imagePrep';
@@ -19,6 +19,7 @@ import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { ApiKeyModal } from './ApiKeyModal';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
+import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
 import { detectFabricatedText } from '../lib/fabricationCheck';
 import type { FabricationFinding } from '../lib/fabricationCheck';
 
@@ -447,6 +448,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   // Opt-in: also generate the section list (blueprint JSON) in Blueprinter mode, so the
   // section editor has the crawled structure to edit. Off by default — costs one extra Claude call.
   const [generateBlueprint, setGenerateBlueprint] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const resolvedKey = localApiKey || anthropicKey || null;
@@ -1002,7 +1004,17 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-xl font-bold text-gray-900 mb-1">Design Extractor</h2>
+        <div className="flex items-center space-x-2 mb-1">
+          <h2 className="text-xl font-bold text-gray-900">Blueprint Maker</h2>
+          <button
+            onClick={() => setShowHelp(true)}
+            className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-full transition-colors"
+            aria-label="Abrir la guía de Blueprint Maker"
+            title="¿Cómo funciona?"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+        </div>
         <p className="text-sm text-gray-500">
           {outputMode === 'blueprinter'
             ? <>Blueprinter: extrae <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">design.md</code> (estilo), <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">copy.md</code> (texto) e <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">images.md</code> (imágenes). Aporta tú la estructura con un screenshot.</>
@@ -1258,6 +1270,8 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           </div>
         </div>
       )}
+
+      {showHelp && <BlueprintMakerHelpModal onClose={() => setShowHelp(false)} />}
 
       {/* Section editor — available with or without an extraction */}
       <SectionEditorPanel

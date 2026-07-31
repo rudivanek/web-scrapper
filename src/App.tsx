@@ -285,7 +285,7 @@ function AppContent() {
                 >
                   <div className="flex items-center justify-center space-x-2">
                     <Wand2 className="w-4 h-4" />
-                    <span>Design Extract</span>
+                    <span>Blueprint Maker</span>
                   </div>
                 </button>
               </div>
