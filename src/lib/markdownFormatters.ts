@@ -211,7 +211,6 @@ export async function generateBrandingMarkdown(
   data: BrandingForExport,
   siteName: string,
   siteUrl: string,
-  anthropicKey: string,
   fontFiles: FontFileInfo[] = [],
   cssData: CssExtractResult | null = null
 ): Promise<string> {
@@ -251,7 +250,7 @@ Spacing/border radius: ${JSON.stringify(data.spacing ?? {})}
 
 Write the four sections now. Be specific to this brand — do not write generic advice.`;
 
-  const narrative = await callClaude(anthropicKey, systemPrompt, userPrompt, 2000);
+  const narrative = await callClaude(systemPrompt, userPrompt, 2000);
 
   let fontSection = '';
   if (fontFiles.length > 0) {

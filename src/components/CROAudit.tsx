@@ -41,10 +41,6 @@ import { exportCROAuditToHtml, exportSEOAuditToHtml, exportCopyAnalysisToHtml, e
 import type { AuditResult, SEOAuditResult } from '../types/audit';
 import type { CopyAnalysisResult } from '../types/copyAnalysis';
 
-interface CROAuditProps {
-  anthropicKey: string;
-}
-
 interface ScrapedData {
   url: string;
   markdown: string;
@@ -86,7 +82,7 @@ function playDing() {
   }
 }
 
-export function CROAudit({ anthropicKey }: CROAuditProps) {
+export function CROAudit() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'cro' | 'seo' | 'copy' | 'copyzap'>(() => {
     const saved = sessionStorage.getItem('cro_audit_tab');
@@ -402,7 +398,7 @@ export function CROAudit({ anthropicKey }: CROAuditProps) {
       setAuditId(currentAuditId);
 
       const userPrompt = buildCROUserPrompt(auditData);
-      const rawResult = await callClaude(anthropicKey, CRO_SYSTEM_PROMPT, userPrompt, 16000);
+      const rawResult = await callClaude(CRO_SYSTEM_PROMPT, userPrompt, 16000);
       const structuredResult = parseClaudeJson(rawResult);
 
       await supabase
@@ -475,7 +471,7 @@ export function CROAudit({ anthropicKey }: CROAuditProps) {
       setAuditId(currentAuditId);
 
       const userPrompt = buildSEOUserPrompt(auditData);
-      const rawResult = await callClaude(anthropicKey, SEO_SYSTEM_PROMPT, userPrompt, 16000);
+      const rawResult = await callClaude(SEO_SYSTEM_PROMPT, userPrompt, 16000);
       const structuredResult = parseClaudeJson(rawResult);
 
       await supabase.from('audits').update({
@@ -541,7 +537,7 @@ export function CROAudit({ anthropicKey }: CROAuditProps) {
       setAuditId(currentAuditId);
 
       const pass1UserPrompt = buildCopyPass1UserPrompt(auditData);
-      const pass1Raw = await callClaude(anthropicKey, COPY_SYSTEM_PROMPT_PASS1, pass1UserPrompt, COPY_MAX_TOKENS_PASS1);
+      const pass1Raw = await callClaude(COPY_SYSTEM_PROMPT_PASS1, pass1UserPrompt, COPY_MAX_TOKENS_PASS1);
       const pass1Result = parseClaudeJson(pass1Raw);
 
       const partialMerged = mergePassResults(pass1Result, null);
@@ -560,7 +556,7 @@ export function CROAudit({ anthropicKey }: CROAuditProps) {
       setSpinnerMessage('Running Copy Analysis Pass 2 (rewrites)... almost done.');
 
       const pass2UserPrompt = buildCopyPass2UserPrompt(pass1Result, auditData);
-      const pass2Raw = await callClaude(anthropicKey, COPY_SYSTEM_PROMPT_PASS2, pass2UserPrompt, COPY_MAX_TOKENS_PASS2);
+      const pass2Raw = await callClaude(COPY_SYSTEM_PROMPT_PASS2, pass2UserPrompt, COPY_MAX_TOKENS_PASS2);
       const pass2Result = parseClaudeJson(pass2Raw);
 
       const finalMerged = mergePassResults(pass1Result, pass2Result);
@@ -625,7 +621,7 @@ export function CROAudit({ anthropicKey }: CROAuditProps) {
 
       const { CONTENT_SUGGESTIONS_SYSTEM_PROMPT, buildContentSuggestionsUserPrompt } = await import('../lib/prompts/contentSuggestionsPrompt');
       const userPrompt = buildContentSuggestionsUserPrompt(auditData);
-      const rawResult = await callClaude(anthropicKey, CONTENT_SUGGESTIONS_SYSTEM_PROMPT, userPrompt, 12000);
+      const rawResult = await callClaude(CONTENT_SUGGESTIONS_SYSTEM_PROMPT, userPrompt, 12000);
       const structuredResult = parseClaudeJson(rawResult);
 
       const mergedResult = {

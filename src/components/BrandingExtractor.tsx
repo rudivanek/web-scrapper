@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { scrapeBranding, extractFontFileUrls, extractCssData, type FontFileInfo, type CssExtractResult } from '../lib/firecrawl';
 import { generateBrandingMarkdown } from '../lib/markdownFormatters';
-import { ApiKeyModal } from './ApiKeyModal';
 import { Palette, Type, Image, Loader2, ExternalLink, Copy, Check, ChevronDown, ChevronUp, AlertCircle, Layers, LayoutGrid as Layout, Sparkles, Sun, Moon, Zap, Box, FileDown, Download, Code2, Variable, Film, Monitor } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -325,7 +324,7 @@ function KVGrid({ data }: { data: Record<string, unknown> }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function BrandingExtractor({ anthropicKey }: { anthropicKey?: string }) {
+export function BrandingExtractor() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [branding, setBranding] = useState<BrandingData | null>(null);
@@ -337,11 +336,6 @@ export function BrandingExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [copiedRaw, setCopiedRaw] = useState(false);
   const [exportingMd, setExportingMd] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [localApiKey, setLocalApiKey] = useState<string | null>(null);
-
-  const resolvedApiKey = localApiKey || anthropicKey || null;
-
   const handleExtract = async () => {
     const trimmed = url.trim();
     if (!trimmed) return;
@@ -375,14 +369,14 @@ export function BrandingExtractor({ anthropicKey }: { anthropicKey?: string }) {
     }
   };
 
-  const runExportWithKey = async (key: string) => {
+  const runExportWithKey = async () => {
     if (!branding) return;
     setExportingMd(true);
     setExportError(null);
     try {
       const hostname = (() => { try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, ''); } catch { return url; } })();
       const siteName = hostname.split('.')[0].charAt(0).toUpperCase() + hostname.split('.')[0].slice(1);
-      const md = await generateBrandingMarkdown(branding, siteName, url, key, fontFiles, cssData);
+      const md = await generateBrandingMarkdown(branding, siteName, url, fontFiles, cssData);
       const blob = new Blob([md], { type: 'text/markdown' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
@@ -398,17 +392,7 @@ export function BrandingExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
   const handleExportMarkdown = () => {
     if (!branding) return;
-    if (!resolvedApiKey) {
-      setShowApiKeyModal(true);
-      return;
-    }
-    runExportWithKey(resolvedApiKey);
-  };
-
-  const handleApiKeyConfirmed = (key: string) => {
-    setLocalApiKey(key);
-    setShowApiKeyModal(false);
-    runExportWithKey(key);
+    runExportWithKey();
   };
 
   const colorEntries = resolveColorEntries(branding?.colors);
@@ -445,13 +429,6 @@ export function BrandingExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-
-      {showApiKeyModal && (
-        <ApiKeyModal
-          onKeyConfirmed={handleApiKeyConfirmed}
-          onSkip={() => setShowApiKeyModal(false)}
-        />
-      )}
 
       {/* Header */}
       <div className="mb-8">

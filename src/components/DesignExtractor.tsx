@@ -17,7 +17,6 @@ import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget 
 type BuilderFormat = 'html' | 'react';
 import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
-import { ApiKeyModal } from './ApiKeyModal';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
 import { detectFabricatedText } from '../lib/fabricationCheck';
@@ -426,13 +425,11 @@ function VibePromptPanel({
 
 // ─── Main Component ─────────────────────────────────────────────────────────────
 
-export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
+export function DesignExtractor() {
   const [url, setUrl] = useState('');
   const [state, setState] = useState<ExtractionState>({ phase: 'idle', message: '', progress: 0 });
   const [result, setResult] = useState<ExtractionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [localApiKey, setLocalApiKey] = useState<string | null>(null);
   const [buildTarget, setBuildTarget] = useState<BuildTarget>('react-tailwind');
   const [structureUrl, setStructureUrl] = useState('');
   const [copySource, setCopySource] = useState<'structure' | 'placeholder'>('structure');
@@ -455,14 +452,13 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
   const [ownDesignMd, setOwnDesignMd] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  const resolvedKey = localApiKey || anthropicKey || null;
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
 
   const setPhase = (phase: ExtractionState['phase'], message: string, progress: number) => {
     setState({ phase, message, progress });
   };
 
-  const runExtraction = async (apiKey: string) => {
+  const runExtraction = async () => {
     const designUrl = normalizeUrl(url);
     const structUrl = structureUrl.trim() ? normalizeUrl(structureUrl) : designUrl;
     const dual = designUrl !== structUrl;
@@ -588,7 +584,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // section editor silently shows nothing and the builder prompt silently drops back to four
       // inputs. Use continuation, and flag both truncation and unparseable output.
       const blueprintRes = await callWithContinuation(
-        apiKey,
         BLUEPRINT_SYSTEM_PROMPT,
         blueprintUserPrompt,
         16000,
@@ -660,7 +655,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       // Use the same continuation mechanism the BUILD.md calls already use, and surface it
       // when even that runs out.
       const designRes = await callWithContinuation(
-        apiKey,
         DESIGN_SYSTEM_PROMPT,
         designUserPrompt,
         16000,
@@ -762,7 +756,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           // Call 1: Foundation (sections 1–4)
           console.log(`[pipeline] design.md -> foundation: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
           const foundationPrompt = buildFoundationUserPrompt(designMd, blueprintJson);
-          const foundationRes = await callWithContinuation(apiKey, BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 16000, imgs, 'Foundation');
+          const foundationRes = await callWithContinuation(BUILD_SPEC_FOUNDATION_PROMPT, foundationPrompt, 16000, imgs, 'Foundation');
           let foundationText = foundationRes.text.trim();
           if (foundationRes.truncated) {
             console.warn('[BUILD.md] Foundation call truncated after continuations (stop_reason=max_tokens)');
@@ -795,7 +789,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             for (const range of sectionBatchRanges) {
               console.log(`[pipeline] design.md -> sections batch ${range.start}–${range.end}: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
               const batchPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText, range);
-              const batchRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs, `Sections batch ${range.start}–${range.end}`);
+              const batchRes = await callWithContinuation(BUILD_SPEC_SECTIONS_PROMPT, batchPrompt, 16000, imgs, `Sections batch ${range.start}–${range.end}`);
               sectionsText += (sectionsText ? '\n\n' : '') + batchRes.text.trim();
               if (batchRes.truncated) {
                 console.warn(`[BUILD.md] Sections batch ${range.start}–${range.end} truncated after continuations (stop_reason=max_tokens)`);
@@ -805,7 +799,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           } else {
             console.log(`[pipeline] design.md -> sections: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
             const sectionsPrompt = buildSectionsUserPrompt(designMd, blueprintJson, foundationText);
-            const sectionsRes = await callWithContinuation(apiKey, BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs, 'Sections');
+            const sectionsRes = await callWithContinuation(BUILD_SPEC_SECTIONS_PROMPT, sectionsPrompt, 16000, imgs, 'Sections');
             sectionsText = sectionsRes.text.trim();
             if (sectionsRes.truncated) {
               console.warn('[BUILD.md] Sections call truncated after continuations (stop_reason=max_tokens)');
@@ -838,7 +832,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
           const sections1to5 = foundationText + '\n\n' + sectionsText;
           console.log(`[pipeline] design.md -> components: ${designMd.length} chars, starts "${designMd.slice(0, 60).replace(/\n/g, ' ')}"`);
           const componentsPrompt = buildComponentsUserPrompt(designMd, sections1to5);
-          const componentsRes = await callWithContinuation(apiKey, BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 16000, imgs, 'Components');
+          const componentsRes = await callWithContinuation(BUILD_SPEC_COMPONENTS_PROMPT, componentsPrompt, 16000, imgs, 'Components');
           let componentsText = componentsRes.text.trim();
           if (componentsRes.truncated) {
             console.warn('[BUILD.md] Components call truncated after continuations (stop_reason=max_tokens)');
@@ -960,17 +954,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
       return;
     }
     setStructureUrlError(null);
-    if (!resolvedKey) {
-      setShowApiKeyModal(true);
-      return;
-    }
-    runExtraction(resolvedKey);
-  };
-
-  const handleApiKeyConfirmed = (key: string) => {
-    setLocalApiKey(key);
-    setShowApiKeyModal(false);
-    runExtraction(key);
+    runExtraction();
   };
 
   const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
@@ -1013,14 +997,7 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      {showApiKeyModal && (
-        <ApiKeyModal
-          onKeyConfirmed={handleApiKeyConfirmed}
-          onSkip={() => setShowApiKeyModal(false)}
-        />
-      )}
 
-      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center space-x-2 mb-1">
           <h2 className="text-xl font-bold text-gray-900">Blueprint Maker</h2>

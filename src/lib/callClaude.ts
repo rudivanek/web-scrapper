@@ -26,7 +26,6 @@ export interface ClaudeResult {
 }
 
 export async function callClaudeWithMeta(
-  apiKey: string,
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
@@ -44,16 +43,11 @@ export async function callClaudeWithMeta(
       ]
     : userPrompt;
 
-  // Calls go through the anthropic-proxy edge function so the API key stays in Supabase
-  // secrets and never reaches the browser — same pattern as firecrawl-proxy. The apiKey
-  // parameter is no longer used; it is kept on the signature until the call sites and the
-  // key-entry UI are removed.
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Supabase no está configurado: faltan VITE_SUPABASE_URL o VITE_SUPABASE_ANON_KEY.');
   }
-  void apiKey;
 
   const doFetch = (content: unknown) =>
     fetch(`${supabaseUrl}/functions/v1/anthropic-proxy`, {
@@ -117,13 +111,12 @@ export async function callClaudeWithMeta(
 }
 
 export async function callClaude(
-  apiKey: string,
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
   images?: string[]
 ): Promise<string> {
-  const result = await callClaudeWithMeta(apiKey, systemPrompt, userPrompt, maxTokens, images);
+  const result = await callClaudeWithMeta(systemPrompt, userPrompt, maxTokens, images);
   return result.text;
 }
 
@@ -135,7 +128,6 @@ export interface ContinuationResult {
 }
 
 export async function callWithContinuation(
-  apiKey: string,
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
@@ -148,7 +140,7 @@ export async function callWithContinuation(
   let continuations = 0;
   const maxContinuations = 2;
 
-  const baseResult = await callClaudeWithMeta(apiKey, systemPrompt, userPrompt, maxTokens, images);
+  const baseResult = await callClaudeWithMeta(systemPrompt, userPrompt, maxTokens, images);
   text = baseResult.text;
   stopReason = baseResult.stopReason;
 
@@ -156,7 +148,7 @@ export async function callWithContinuation(
     continuations++;
     console.warn(`[BUILD.md] ${segmentLabel} continuation ${continuations} (stop_reason=${stopReason})`);
     const continuationUserPrompt = 'Continue exactly where you left off. Do not repeat any content already written. Do not add a preamble. Resume mid-sentence if necessary.';
-    const contResult = await callClaudeWithMeta(apiKey, systemPrompt, continuationUserPrompt, maxTokens, safeImages.length > 0 ? safeImages : undefined);
+    const contResult = await callClaudeWithMeta(systemPrompt, continuationUserPrompt, maxTokens, safeImages.length > 0 ? safeImages : undefined);
     text += contResult.text;
     stopReason = contResult.stopReason;
   }

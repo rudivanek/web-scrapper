@@ -13,7 +13,6 @@ import { CROAudit } from './components/CROAudit';
 import { BrandingExtractor } from './components/BrandingExtractor';
 import { PageInteractor } from './components/PageInteractor';
 import { DesignExtractor } from './components/DesignExtractor';
-import { ApiKeyModal } from './components/ApiKeyModal';
 import { LogOut, Home, Archive, DollarSign, Loader2, Activity, Globe, Shell, FileCode, TrendingUp, Paintbrush, MousePointer2, Wand2 } from 'lucide-react';
 
 type View = 'crawl' | 'saved' | 'details' | 'seo-details' | 'tokens' | 'cro-audit';
@@ -22,10 +21,6 @@ type CrawlTab = 'crawler' | 'seo' | 'fullpage' | 'branding' | 'interact' | 'desi
 function AppContent() {
   const { user, loading, signOut } = useAuth();
   const { notification, clearNotification } = useNotification();
-  const [anthropicKey, setAnthropicKey] = useState(() => {
-    const saved = sessionStorage.getItem('anthropic_api_key');
-    return saved || '';
-  });
   const [currentView, setCurrentView] = useState<View>(() => {
     const saved = sessionStorage.getItem('app_view');
     return (saved as View) || 'crawl';
@@ -49,15 +44,8 @@ function AppContent() {
     }
   }, [currentView]);
 
-  useEffect(() => {
-    if (anthropicKey) {
-      sessionStorage.setItem('anthropic_api_key', anthropicKey);
-    }
-  }, [anthropicKey]);
-
   const [selectedCrawlId, setSelectedCrawlId] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   const handleViewCrawl = (crawlId: string, itemType: 'crawler' | 'seo') => {
     setSelectedCrawlId(crawlId);
@@ -77,6 +65,8 @@ function AppContent() {
     await signOut();
     sessionStorage.removeItem('app_view');
     sessionStorage.removeItem('app_crawl_tab');
+    // Purges any key left behind by the old client-side flow. The key now lives only in
+    // Supabase secrets; nothing writes this entry any more.
     sessionStorage.removeItem('anthropic_api_key');
     sessionStorage.removeItem('cro_audit_tab');
     sessionStorage.removeItem('cro_show_history');
@@ -91,7 +81,6 @@ function AppContent() {
     sessionStorage.removeItem('cro_copyzap_result');
     setCurrentView('crawl');
     setActiveCrawlTab('crawler');
-    setAnthropicKey('');
   };
 
   if (loading) {
@@ -116,15 +105,6 @@ function AppContent() {
       </>
     );
   }
-
-  const handleSkipApiKey = () => {
-    setShowApiKeyModal(false);
-  };
-
-  const handleKeyConfirmed = (key: string) => {
-    setAnthropicKey(key);
-    setShowApiKeyModal(false);
-  };
 
   return (
     <>
@@ -294,9 +274,9 @@ function AppContent() {
               {activeCrawlTab === 'crawler' && <Crawler onSaveSuccess={handleSaveSuccess} />}
               {activeCrawlTab === 'fullpage' && <FullPageScraper />}
               {activeCrawlTab === 'seo' && <SEOIntelligence />}
-              {activeCrawlTab === 'branding' && <BrandingExtractor anthropicKey={anthropicKey || undefined} />}
+              {activeCrawlTab === 'branding' && <BrandingExtractor />}
               {activeCrawlTab === 'interact' && <PageInteractor />}
-              {activeCrawlTab === 'design' && <DesignExtractor anthropicKey={anthropicKey || undefined} />}
+              {activeCrawlTab === 'design' && <DesignExtractor />}
             </div>
           </div>
         )}
@@ -324,22 +304,7 @@ function AppContent() {
         {currentView === 'tokens' && <TokenUsage />}
         {currentView === 'cro-audit' && (
           <div className="w-full max-w-7xl mx-auto">
-            {!anthropicKey ? (
-              <div className="bg-white shadow-sm border border-gray-300 p-8 text-center">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">API Key Required</h2>
-                <p className="text-gray-600 mb-6">
-                  The CRO Audit feature requires an Anthropic API key to analyze your pages.
-                </p>
-                <button
-                  onClick={() => setShowApiKeyModal(true)}
-                  className="px-6 py-3 bg-gray-900 text-white font-semibold hover:bg-gray-800 transition-colors"
-                >
-                  Enter API Key
-                </button>
-              </div>
-            ) : (
-              <CROAudit anthropicKey={anthropicKey} />
-            )}
+            <CROAudit />
           </div>
         )}
       </main>
@@ -352,10 +317,6 @@ function AppContent() {
         />
       )}
     </div>
-
-    {showApiKeyModal && (
-      <ApiKeyModal onKeyConfirmed={handleKeyConfirmed} onSkip={handleSkipApiKey} />
-    )}
     </>
   );
 }
