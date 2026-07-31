@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Layers, ChevronDown, ChevronRight, Plus, AlertCircle,
   Clipboard, Check, FileDown,
@@ -7,6 +7,8 @@ import type { BlueprintSection } from '../../types/sections';
 import { useBlueprintSections } from '../../hooks/useBlueprintSections';
 import { SectionCard } from './SectionCard';
 import { SectionTemplateModal } from './SectionTemplateModal';
+import { saveSections, loadSections, clearSections, describeAge } from '../../lib/sectionStorage';
+import type { StoredSections } from '../../lib/sectionStorage';
 
 interface SectionEditorPanelProps {
   /** Current blueprint JSON. Empty string is valid — that is composer mode. */
@@ -30,6 +32,38 @@ export function SectionEditorPanel({
     sections, parseError, dirty,
     addSection, updateSection, deleteSection, moveSection, duplicateSection, toJson,
   } = useBlueprintSections(blueprintJson, onChange);
+
+  // ── Persistence ──────────────────────────────────────────────────────────
+  // Sections live in memory, so a reload would lose them. Save on change, and
+  // offer to restore when the editor comes up empty (which is always the case
+  // after a reload, since no extraction survives it).
+  const [restorable, setRestorable] = useState<StoredSections | null>(null);
+  const restoreChecked = useRef(false);
+
+  useEffect(() => {
+    if (restoreChecked.current) return;
+    restoreChecked.current = true;
+    if (blueprintJson.trim()) return;   // a live blueprint wins over saved state
+    const saved = loadSections();
+    if (saved && saved.sectionCount > 0) setRestorable(saved);
+  }, [blueprintJson]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    saveSections(toJson(), siteName, sections.length);
+  }, [dirty, sections, siteName, toJson]);
+
+  const handleRestore = () => {
+    if (!restorable) return;
+    onChange(restorable.json);
+    setRestorable(null);
+    setExpanded(true);
+  };
+
+  const handleDiscard = () => {
+    clearSections();
+    setRestorable(null);
+  };
 
   const handleTemplateSelect = (patch: Partial<BlueprintSection> | null) => {
     setShowTemplates(false);
@@ -112,6 +146,33 @@ export function SectionEditorPanel({
           )}
         </div>
       </div>
+
+      {restorable && (
+        <div className="flex items-start justify-between gap-3 px-5 py-3 bg-blue-50 border-b border-blue-200">
+          <div className="flex items-start space-x-2 min-w-0">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" />
+            <p className="text-xs text-blue-800 leading-relaxed">
+              Tienes {restorable.sectionCount}{' '}
+              {restorable.sectionCount === 1 ? 'sección guardada' : 'secciones guardadas'} de tu sesión
+              anterior{restorable.sourceUrl ? ` (${restorable.sourceUrl})` : ''}, {describeAge(restorable.savedAt)}.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleDiscard}
+              className="px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 rounded transition-colors"
+            >
+              Descartar
+            </button>
+            <button
+              onClick={handleRestore}
+              className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors"
+            >
+              Restaurar
+            </button>
+          </div>
+        </div>
+      )}
 
       {expanded && (
         <div className="p-5 space-y-3">
