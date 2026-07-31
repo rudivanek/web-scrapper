@@ -1501,17 +1501,6 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
             </div>
           )}
 
-          {/* Blueprint JSON output — hidden in single-file mode */}
-          {result.outputMode === 'full' && (
-            <OutputPanel
-              title="Page Blueprint JSON"
-              icon={<Layers className="w-4 h-4" />}
-              content={result.blueprintJson}
-              filename={`${site}-blueprint.json`}
-              downloadMime="application/json"
-            />
-          )}
-
           {/* BUILD.md incomplete warning */}
           {result.buildTarget === 'react-tailwind' && result.buildMd && result.buildMdIncomplete && (
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
@@ -1552,6 +1541,19 @@ export function DesignExtractor({ anthropicKey }: { anthropicKey?: string }) {
               content={result.imagesMd}
               filename={`${site}-images.md`}
               downloadMime="text/markdown"
+            />
+          )}
+
+          {/* blueprint.json output — shown whenever a section list exists, in any mode.
+              Reads the same result.blueprintJson the section editor writes to, so this
+              download and the editor's "Descargar" always produce identical files. */}
+          {result.blueprintJson.trim() && (
+            <OutputPanel
+              title="blueprint.json"
+              icon={<Layers className="w-4 h-4" />}
+              content={result.blueprintJson}
+              filename={`${site}-blueprint.json`}
+              downloadMime="application/json"
             />
           )}
 
