@@ -82,12 +82,14 @@ export function useBlueprintSections(
    */
   const instructions = typeof envelope.user_instructions === 'string' ? envelope.user_instructions : '';
 
-  const setInstructions = useCallback((text: string) => {
+  const writeEnvelope = useCallback((patch: Record<string, unknown>) => {
     const nextEnvelope = { ...envelope };
-    if (text.trim()) {
-      nextEnvelope.user_instructions = text;
-    } else {
-      delete nextEnvelope.user_instructions;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined || value === '' || (typeof value === 'string' && !value.trim())) {
+        delete nextEnvelope[key];
+      } else {
+        nextEnvelope[key] = value;
+      }
     }
     setEnvelope(nextEnvelope);
     setDirty(true);
@@ -95,6 +97,37 @@ export function useBlueprintSections(
     lastEmitted.current = json;
     onChange?.(json);
   }, [envelope, sections, onChange]);
+
+  const setInstructions = useCallback((text: string) => {
+    writeEnvelope({ user_instructions: text });
+  }, [writeEnvelope]);
+
+  /** 'structured' = section cards; 'free' = one free-form description. Stored in the envelope. */
+  const mode: 'structured' | 'free' = envelope.blueprint_mode === 'free' ? 'free' : 'structured';
+  const freeForm = typeof envelope.free_form === 'string' ? envelope.free_form : '';
+
+  const setMode = useCallback((next: 'structured' | 'free') => {
+    // Sections are never discarded — both modes live in the same blueprint, and only the
+    // active one is sent to the builder. Switching back restores everything untouched.
+    writeEnvelope({ blueprint_mode: next === 'free' ? 'free' : undefined });
+  }, [writeEnvelope]);
+
+  const setFreeForm = useCallback((text: string) => {
+    writeEnvelope({ free_form: text });
+  }, [writeEnvelope]);
+
+  /** Plain-text outline of the current sections, as a starting draft for free mode. */
+  const outlineFromSections = useCallback((): string => {
+    if (sections.length === 0) return '';
+    return sections.map((sec, i) => {
+      const lc = sec.layout_contract;
+      const bits = [lc.desktop_layout, lc.column_structure].filter(Boolean).join(' · ');
+      const head = `${i + 1}. ${sec.section_name} (${sec.section_type})${bits ? ` — ${bits}` : ''}`;
+      const copy = sec.headline ? `\n   Titular: ${sec.headline}` : '';
+      const imgs = sec.assets.length > 0 ? `\n   ${sec.assets.length} imagen${sec.assets.length === 1 ? '' : 'es'}` : '';
+      return head + copy + imgs;
+    }).join('\n');
+  }, [sections]);
 
   const toJson = useCallback(
     () => serializeBlueprint(envelope, sections),
@@ -106,6 +139,11 @@ export function useBlueprintSections(
     envelope,
     instructions,
     setInstructions,
+    mode,
+    setMode,
+    freeForm,
+    setFreeForm,
+    outlineFromSections,
     parseError,
     dirty,
     addSection,

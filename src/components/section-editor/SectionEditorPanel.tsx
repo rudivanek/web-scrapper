@@ -30,6 +30,7 @@ export function SectionEditorPanel({
 
   const {
     sections, parseError, dirty, instructions, setInstructions,
+    mode, setMode, freeForm, setFreeForm, outlineFromSections,
     addSection, updateSection, deleteSection, moveSection, duplicateSection, toJson,
   } = useBlueprintSections(blueprintJson, onChange);
 
@@ -199,6 +200,63 @@ export function SectionEditorPanel({
             </div>
           )}
 
+          {/* Mode toggle — only one mode is sent to the builder */}
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+            <button
+              onClick={() => setMode('structured')}
+              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                mode === 'structured' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Estructurado
+            </button>
+            <button
+              onClick={() => setMode('free')}
+              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                mode === 'free' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Libre
+            </button>
+          </div>
+
+          {mode === 'free' ? (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="px-3.5 py-2.5 bg-gray-50 border-b border-gray-200 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-gray-700">Descripción libre de la página</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Describe la página como quieras. Esto reemplaza la lista de secciones en el prompt —
+                    las secciones se conservan por si vuelves a Estructurado.
+                  </p>
+                </div>
+                {sections.length > 0 && (
+                  <button
+                    onClick={() => setFreeForm(freeForm.trim() ? freeForm : outlineFromSections())}
+                    disabled={Boolean(freeForm.trim())}
+                    className="shrink-0 px-2.5 py-1.5 text-[11px] font-medium border border-gray-300 text-gray-600 hover:border-gray-900 hover:text-gray-900 disabled:opacity-40 disabled:hover:border-gray-300 rounded transition-colors"
+                    title={freeForm.trim() ? 'Vacía el campo para rellenarlo desde las secciones' : undefined}
+                  >
+                    Rellenar desde las secciones
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={freeForm}
+                onChange={e => setFreeForm(e.target.value)}
+                rows={14}
+                className="w-full border-0 px-3.5 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none resize-y"
+                placeholder={'Ejemplo:\n\n1. Hero a pantalla completa, imagen de fondo oscura, titular centrado y un CTA.\n2. Tres columnas de servicios con icono, título y descripción.\n3. Testimonios en carrusel.\n4. CTA final a ancho completo.'}
+              />
+              {!freeForm.trim() && (
+                <p className="px-3.5 pb-2.5 text-[11px] text-amber-700">
+                  Vacío: el prompt no llevará estructura. Escribe algo o vuelve a Estructurado.
+                </p>
+              )}
+            </div>
+          ) : (
+          <>
+
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <div className="px-3.5 py-2.5 bg-gray-50 border-b border-gray-200">
               <p className="text-xs font-medium text-gray-700">Instrucciones de layout</p>
@@ -258,6 +316,8 @@ export function SectionEditorPanel({
                 <Plus className="w-4 h-4" /> Añadir sección
               </button>
             </>
+          )}
+          </>
           )}
         </div>
       )}

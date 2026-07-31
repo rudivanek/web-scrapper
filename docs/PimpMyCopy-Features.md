@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.21 | Last Updated: 2026-07-31T12:00:00Z -->
+<!-- Version: 8.22 | Last Updated: 2026-07-31T13:00:00Z -->
 
 ---
 
@@ -2539,6 +2539,64 @@ The key was typed into a modal on every session, held in component state, and wr
 - **`BuildOutputTarget` is referenced but not defined** (`DesignExtractor.tsx`, TS2304) — one of three standing pre-existing errors, and the only genuinely broken reference rather than an unused variable. Worth tracing before it bites at runtime.
 - **`setOutputMode` is never called**, so `outputMode` is permanently `'blueprinter'`. The `'full'` mode (BUILD.md generation) is unreachable. Restoring the selector is a product decision.
 - **copy.md flattens footer columns.** The blueprint reports multiple footer columns; copy.md merges them into a single list. Needs the real `<footer>` outerHTML to fix safely.
+
+---
+
+## Section Editor — Two Modes: Estructurado / Libre
+
+**Added:** 2026-07-31
+
+The section editor now has two modes switchable via a toggle at the top of the panel.
+
+### Modes
+
+**Estructurado** (default): The existing section-cards UI. Every section is shown as a card with layout contract, copy, images and constraints. The "Instrucciones de layout" override box is also visible.
+
+**Libre**: A single large textarea replaces the section cards and the instructions box. The user writes a plain-language description of the page ("1. Hero a pantalla completa…"). This description is sent to the builder instead of the section list.
+
+### Design Decisions
+
+**Sections are never discarded.** Both modes live in the same blueprint envelope (`blueprint_mode`, `free_form`). Switching to Libre hides the cards; switching back restores them completely. The envelope already round-trips through save, download, localStorage persistence and restore — no new plumbing was needed.
+
+**Free mode replaces the section list in the prompt.** Sending both the section list and the free text would give the builder two competing descriptions of the same page. When `blueprint_mode === 'free'` and `free_form` is non-empty, `blueprintBlock` is set to empty and `freeSection` injects a `## Page structure (authoritative)` block instead.
+
+**`user_instructions` is suppressed in free mode.** In Estructurado those instructions are changes *to* the extracted structure; in Libre the free text already IS the structure, so a second override block is meaningless. `isFreeMode` short-circuits `blueprintInstructions()` to `''`.
+
+**Empty free text falls back to the section list.** `blueprintFreeForm()` returns `''` if `blueprint_mode !== 'free'` or `free_form` is blank. All subsequent computed vars treat this as "not free mode", so the prompt is byte-identical to Estructurado mode.
+
+**"Rellenar desde las secciones"** seeds the textarea with a plain-text outline of the current sections (name, type, desktop layout, column structure, headline, image count). Disabled once the box has content to prevent overwriting work.
+
+### Prompt Shape in Libre Mode (with text)
+
+```
+… five inputs:
+…
+5. STRUCTURE — from "Page structure" below. This is the user's own description of the page.
+   Build the sections it describes, in the order given. It is authoritative over the
+   screenshot for what sections exist and how they are arranged.
+
+---
+
+## Page structure (authoritative)
+
+1. Hero a pantalla completa, imagen de fondo oscura, titular centrado y un CTA.
+2. Tres columnas de servicios…
+```
+
+No `## Section list` or `## Requested layout changes` sections appear in free mode.
+
+### Files Changed (exactly three)
+
+| File | Change |
+|---|---|
+| `src/hooks/useBlueprintSections.ts` | `setInstructions` refactored into a shared `writeEnvelope` callback; `mode`, `freeForm`, `setMode`, `setFreeForm`, `outlineFromSections` added and exported |
+| `src/components/section-editor/SectionEditorPanel.tsx` | Destructures new values; renders the mode toggle; conditionally shows the free textarea or the structured cards + instructions box |
+| `src/lib/vibePrompt.ts` | `blueprintFreeForm()` helper; `isFreeMode` / `blueprintBlock` / `freeInput` / `freeSection` computed vars; instructions suppressed in free mode; `inputCount` accounts for free mode; `${freeInput}` and `${freeSection}` wired into the template |
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
 
 ---
 

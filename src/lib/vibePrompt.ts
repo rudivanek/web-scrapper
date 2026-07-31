@@ -510,6 +510,18 @@ ${isCrossSite(input.provenance) ? '\n## CROSS-SITE CAUTION\nDesign and structure
  * and the layout_contract rules. Returns '' when there is no usable blueprint, so
  * the prompt stays byte-identical to its pre-blueprint form.
  */
+/** Free-form page description, used instead of the section list when mode is 'free'. */
+function blueprintFreeForm(blueprintJson?: string): string {
+  if (!blueprintJson || !blueprintJson.trim()) return '';
+  try {
+    const bp = JSON.parse(blueprintJson) as { blueprint_mode?: unknown; free_form?: unknown };
+    if (bp?.blueprint_mode !== 'free') return '';
+    return typeof bp?.free_form === 'string' ? bp.free_form.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 /** Free-text layout instructions the user typed in the section editor, if any. */
 function blueprintInstructions(blueprintJson?: string): string {
   if (!blueprintJson || !blueprintJson.trim()) return '';
@@ -574,11 +586,21 @@ function formatBlueprintForPrompt(blueprintJson?: string): string {
 export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html', blueprintJson?: string): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
 
-  const blueprintBlock = formatBlueprintForPrompt(blueprintJson);
+  // Free mode replaces the section list entirely — sending both would hand the builder two
+  // competing descriptions of the same page.
+  const freeForm = blueprintFreeForm(blueprintJson);
+  const isFreeMode = freeForm !== '';
+  const blueprintBlock = isFreeMode ? '' : formatBlueprintForPrompt(blueprintJson);
+  const freeInput = isFreeMode
+    ? `\n5. STRUCTURE — from "Page structure" below. This is the user's own description of the page. Build the sections it describes, in the order given. It is authoritative over the screenshot for what sections exist and how they are arranged.`
+    : '';
+  const freeSection = isFreeMode
+    ? `\n\n---\n\n## Page structure (authoritative)\n\n${freeForm}`
+    : '';
   // In dual-URL mode the design comes from one site and the structure/copy from another.
   // Screenshotting the design site yields that site's layout wearing this site's words —
   // the cross-site mix that does not work. Name the right page explicitly.
-  const instructions = blueprintInstructions(blueprintJson);
+  const instructions = isFreeMode ? '' : blueprintInstructions(blueprintJson);
   const hasInstructions = instructions !== '';
   const instructionsInput = hasInstructions
     ? `\n6. LAYOUT CHANGES — from "Requested layout changes" below. These are deliberate changes the user wants to the structure. They OVERRIDE the section list and the screenshot wherever they conflict. Apply them; do not treat them as suggestions.`
@@ -592,7 +614,7 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
     ? ` Screenshot THIS page: ${sourceUrl} — it is the page this structure and copy came from. Do not use a screenshot of the design-reference site.`
     : '';
   const hasBlueprint = blueprintBlock !== '';
-  const inputCount = hasInstructions ? 'six' : (hasBlueprint ? 'five' : 'four');
+  const inputCount = hasInstructions ? 'six' : ((hasBlueprint || isFreeMode) ? 'five' : 'four');
   const blueprintInput = hasBlueprint
     ? `\n5. SECTION ORDER & LAYOUT RULES — from the section list below. Build the sections in exactly this order. For each section, treat MUST PRESERVE as mandatory and DO NOT as forbidden. Where the section list and the screenshot disagree about layout, follow the section list.`
     : '';
@@ -619,7 +641,7 @@ Build a web page from ${inputCount} inputs, each with one job:
 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 2. DESIGN SYSTEM — from design.md below. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
 3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
-4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}${instructionsInput}
+4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}${freeInput}${instructionsInput}
 
 Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
 
@@ -639,7 +661,7 @@ ${designMd}
 
 \`\`\`markdown
 ${copyMd}
-\`\`\`${imagesSection}${blueprintSection}${instructionsSection}`;
+\`\`\`${imagesSection}${blueprintSection}${freeSection}${instructionsSection}`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
