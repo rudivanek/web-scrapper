@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.26 | Last Updated: 2026-08-01T01:00:00Z -->
+<!-- Version: 8.27 | Last Updated: 2026-08-01T02:00:00Z -->
 
 ---
 
@@ -2785,7 +2785,39 @@ Settings you might remember; whether design.md came back complete, or whether th
 
 ---
 
-## Download the screenshot the app already captured (Step 22)
+## Prefixed download filenames (Step 23)
+
+**Added:** 2026-08-01
+
+An extraction produces up to seven downloads and nothing in the names said which one goes to the builder. Every filename is now prefixed so they sort in the order they are used.
+
+### Sorted result in a downloads folder
+
+```
+1-PROMPT_cliente.mx-prompt-lovable.md      ← paste into the builder
+2-SCREENSHOT_cliente.mx.png                ← attach to the builder
+3-CONFIG_cliente.mx-config.md              ← how this run was configured
+4-BLUEPRINT_cliente.mx-blueprint.json      ← the section list
+5-INPUT_cliente.mx-copy.md                 ← already inside the prompt
+5-INPUT_cliente.mx-design.md
+5-INPUT_cliente.mx-images.md
+```
+
+### Why the numbers matter
+
+Without them `BLUEPRINT` and `CONFIG` sort above `PROMPT`, burying the two files that actually get uploaded. The `5-INPUT_` files are reference copies — in Blueprinter mode their contents are already embedded inside the prompt, so they do not get uploaded separately.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/components/DesignExtractor.tsx` | Eight filename prefixes: prompt (1), screenshot (2), config (3), blueprint (4), design/copy/images/BUILD (5) |
+| `src/components/section-editor/SectionEditorPanel.tsx` | Blueprint download matches the output panel's `4-BLUEPRINT_` prefix |
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
 
 **Added:** 2026-08-01
 

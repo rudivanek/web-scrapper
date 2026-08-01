@@ -340,7 +340,7 @@ function VibePromptPanel({
               const dlUrl = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = dlUrl;
-              a.download = `${siteName}-prompt-${vibeTarget}.md`;
+              a.download = `1-PROMPT_${siteName}-prompt-${vibeTarget}.md`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -1564,7 +1564,7 @@ export function DesignExtractor() {
                   <span className="truncate">{structureUrl.trim() || url}</span>
                 </span>
                 <button
-                  onClick={() => downloadScreenshot(result.screenshot as string, `${site}-screenshot.png`)}
+                  onClick={() => downloadScreenshot(result.screenshot as string, `2-SCREENSHOT_${site}.png`)}
                   className="shrink-0 flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium bg-gray-900 text-white hover:bg-gray-800 rounded transition-colors"
                 >
                   <FileDown className="w-3 h-3" />
@@ -1703,7 +1703,7 @@ export function DesignExtractor() {
               title="design.md"
               icon={<Palette className="w-4 h-4" />}
               content={result.designMd}
-              filename={`${site}-design.md`}
+              filename={`5-INPUT_${site}-design.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1785,7 +1785,7 @@ export function DesignExtractor() {
               title="copy.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.copyMd}
-              filename={`${site}-copy.md`}
+              filename={`5-INPUT_${site}-copy.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1796,7 +1796,7 @@ export function DesignExtractor() {
               title="images.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.imagesMd}
-              filename={`${site}-images.md`}
+              filename={`5-INPUT_${site}-images.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1807,7 +1807,7 @@ export function DesignExtractor() {
               title="config.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.configMd}
-              filename={`${site}-config.md`}
+              filename={`3-CONFIG_${site}-config.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1820,7 +1820,7 @@ export function DesignExtractor() {
               title="blueprint.json"
               icon={<Layers className="w-4 h-4" />}
               content={result.blueprintJson}
-              filename={`${site}-blueprint.json`}
+              filename={`4-BLUEPRINT_${site}-blueprint.json`}
               downloadMime="application/json"
             />
           )}
@@ -1838,7 +1838,7 @@ export function DesignExtractor() {
               title={result.outputMode === 'single' ? 'Design Spec (para LLM)' : 'BUILD.md — Reconstruction Spec'}
               icon={<FileDown className="w-4 h-4" />}
               content={result.buildMd}
-              filename={result.outputMode === 'single' ? `${site}-design-spec.md` : `${site}-BUILD.md`}
+              filename={result.outputMode === 'single' ? `5-INPUT_${site}-design-spec.md` : `5-INPUT_${site}-BUILD.md`}
               downloadMime="text/markdown"
             />
           )}
