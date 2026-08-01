@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.25 | Last Updated: 2026-08-01T00:00:00Z -->
+<!-- Version: 8.26 | Last Updated: 2026-08-01T01:00:00Z -->
 
 ---
 
@@ -2777,6 +2777,30 @@ Settings you might remember; whether design.md came back complete, or whether th
 - `editedByHand` is passed as `false` for now — the field exists for when section-editor edits can be detected.
 - The screenshot note correctly distinguishes dual-URL mode: "adjuntar la de {copyUrl} — no la de {designUrl}."
 - Lorem Ipsum runs get a bold warning: "El texto es de relleno. No entregar esta salida a un cliente como su sitio."
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
+
+---
+
+## Download the screenshot the app already captured (Step 22)
+
+**Added:** 2026-08-01
+
+The app already captures a full-page screenshot during extraction (Firecrawl's `screenshot@fullPage`), feeds it to the blueprint, and shows it as a preview — but there was no way to download it, forcing users to re-screenshot the same page with an external tool. The external screenshot is worse: it captures whatever the viewport showed at an arbitrary moment, while the app's is a full-page capture of exactly what was scraped, at the moment it was scraped.
+
+### What changed
+
+One file: `src/components/DesignExtractor.tsx`, two edits.
+
+1. **`downloadScreenshot` helper** — handles all three Firecrawl response shapes (data URI, bare base64, remote URL) and triggers a browser download as a `.png`. Mirrors the same three-way branching already in `imagePrep.ts`'s `prepareScreenshot`.
+2. **Button and note in the screenshot preview** — a "Descargar" button in the preview's title bar, and a caption below the image naming the captured page and instructing the user to attach it to the builder.
+
+### Why the screenshot matters
+
+In dual-URL mode the app captures the *structure* page (the copy URL), which is the one that must be attached to the builder prompt and the one that is easy to get wrong. The download button removes the guesswork.
 
 ### Typecheck / Build
 
