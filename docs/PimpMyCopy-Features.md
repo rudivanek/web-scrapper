@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.23 | Last Updated: 2026-07-31T14:00:00Z -->
+<!-- Version: 8.24 | Last Updated: 2026-07-31T15:00:00Z -->
 
 ---
 
@@ -2687,6 +2687,57 @@ Five display-only corrections to `DesignExtractor.tsx`. No logic, extraction, or
 | 2 | Copy URL placeholder reads "Vacío = usar la URL de arriba" |
 | 3–4 | Images: `!isDualUrl && !fillUnsplash` shows a sentence instead of a one-option radio group |
 | 5 | Phase checklist replaced with `blueprinterSteps` IIFE — only active steps, numbered continuously; reflects `generateBlueprint` and `designSource` |
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
+
+---
+
+## DesignExtractor — Presets (Step 20)
+
+**Added:** 2026-07-31
+
+Replaces the wall of switches with three named jobs plus a manual escape hatch. Picking a job sets every option AND hides the ones it does not need. One file changed: `DesignExtractor.tsx`. No logic changes to extraction — configuration and conditional rendering only.
+
+### The four choices
+
+| Choice | What it does | Shows |
+|---|---|---|
+| **Clonar un sitio** | Rebuild a site as it is. Everything from one URL. | One URL field |
+| **Cambiar el diseño** | Client's content, another site's look — or your own design.md. | Client URL + design source toggle |
+| **Describirlo yo** | You write the page. Free mode, no section list. | URL + the free-text editor |
+| **Configurar a mano** | The full form, unchanged. | Everything |
+
+### Design decisions
+
+- **The chooser is the only thing on screen until a job is picked.** Nothing to decode before declaring intent.
+- **Applying a preset resets its options to a known baseline**, so a leftover setting from an earlier run cannot silently change what a named job does.
+- **"Describirlo yo" turns the section list OFF.** In free mode the user's text replaces the section list, so generating one would be paying for output that gets discarded.
+- **"Cambiar el diseño" sets images to come from the copy site**, since that is the client's own site.
+- **Nothing is removed.** "Configurar a mano" is today's form exactly as it is.
+
+### State added
+
+- `preset: 'clone' | 'restyle' | 'describe' | 'manual' | null` — null shows the chooser.
+- `restyleSource: 'url' | 'file'` — toggle within the restyle preset.
+- `applyPreset(next)` — sets the preset and resets all relevant options to that preset's baseline.
+- `chooseRestyleSource(next)` — switches the restyle sub-mode and adjusts `designSource`.
+- `shows` object — per-control visibility flags derived from the active preset.
+
+### Conditional rendering gates
+
+- The preset chooser replaces the form when `preset === null`.
+- A header bar shows the chosen preset name with a "Cambiar" button to return to the chooser.
+- The restyle sub-toggle (De otro sitio / De mi design.md) appears only under "Cambiar el diseño".
+- Design-source radios gated by `shows.designSourceRadio`; the own-design textarea by `shows.ownDesignBox`.
+- Copy URL field gated by `shows.copyUrl`.
+- Copy-source radio gated by `shows.copySourceRadio`.
+- Section-list checkbox gated by `shows.blueprintCheckbox`.
+- Images radio group gated by `shows.imageSourceRadio`; collapses to a sentence otherwise.
+- Unsplash checkbox always visible.
+- The non-Blueprinter path is untouched — every gate is additionally guarded by `outputMode === 'blueprinter'` where the original was.
 
 ### Typecheck / Build
 

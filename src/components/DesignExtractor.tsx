@@ -450,6 +450,60 @@ export function DesignExtractor() {
   // the client's own site still provides copy, images and structure.
   const [designSource, setDesignSource] = useState<'extract' | 'own'>('extract');
   const [ownDesignMd, setOwnDesignMd] = useState('');
+  // ── Presets ───────────────────────────────────────────────────────────────
+  // Named jobs rather than a wall of switches. A preset both sets the options and
+  // hides the ones it does not need; 'manual' shows the full form unchanged.
+  type Preset = 'clone' | 'restyle' | 'describe' | 'manual';
+  const [preset, setPreset] = useState<Preset | null>(null);
+  const [restyleSource, setRestyleSource] = useState<'url' | 'file'>('url');
+
+  const applyPreset = (next: Preset) => {
+    setPreset(next);
+    // 'describe' starts the editor in free mode. Written straight into the blueprint
+    // envelope, which is the same place the editor's own toggle writes to.
+    if (next === 'describe' && !manualBlueprint.trim()) {
+      setManualBlueprint(JSON.stringify({ blueprint_mode: 'free', sections: [] }, null, 2));
+    }
+    // Reset to this preset's baseline so a leftover setting from a previous run
+    // cannot silently change what a named job does.
+    if (next === 'clone') {
+      setStructureUrl('');
+      setDesignSource('extract');
+      setCopyMode('scrape');
+      setImageSource('design');
+      setGenerateBlueprint(true);
+    } else if (next === 'restyle') {
+      setCopyMode('scrape');
+      setImageSource('copy');
+      setGenerateBlueprint(true);
+      setDesignSource(restyleSource === 'file' ? 'own' : 'extract');
+    } else if (next === 'describe') {
+      setStructureUrl('');
+      setDesignSource('extract');
+      setCopyMode('scrape');
+      setImageSource('design');
+      // Free mode replaces the section list, so generating one would be waste.
+      setGenerateBlueprint(false);
+    }
+  };
+
+  const chooseRestyleSource = (next: 'url' | 'file') => {
+    setRestyleSource(next);
+    setDesignSource(next === 'file' ? 'own' : 'extract');
+    if (next === 'file') setStructureUrl('');
+  };
+
+  const isManual = preset === 'manual';
+  /** Which controls this preset needs on screen. Everything else moves to Avanzado. */
+  const shows = {
+    copyUrl: isManual || (preset === 'restyle' && restyleSource === 'url'),
+    designSourceRadio: isManual,
+    ownDesignBox: isManual || (preset === 'restyle' && restyleSource === 'file'),
+    copySourceRadio: isManual,
+    imageSourceRadio: isManual,
+    blueprintCheckbox: isManual,
+    unsplash: true,
+  };
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
@@ -1029,11 +1083,75 @@ export function DesignExtractor() {
         </p>
       </div>
 
+      {/* Preset chooser — shown until a job is picked */}
+      {outputMode === 'blueprinter' && preset === null && (
+        <div className="mb-8 space-y-2">
+          <p className="text-sm text-gray-600 mb-3">¿Qué quieres hacer?</p>
+          {([
+            { id: 'clone' as const, title: 'Clonar un sitio', desc: 'Reconstruir un sitio tal como está. Todo sale de una sola URL.' },
+            { id: 'restyle' as const, title: 'Cambiar el diseño', desc: 'El contenido del cliente, con el aspecto de otro sitio o de un design.md tuyo.' },
+            { id: 'describe' as const, title: 'Describirlo yo', desc: 'Tú escribes cómo debe ser la página. El diseño sale de una URL.' },
+            { id: 'manual' as const, title: 'Configurar a mano', desc: 'Todas las opciones visibles, sin nada preseleccionado.' },
+          ]).map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => applyPreset(opt.id)}
+              className="w-full text-left p-4 bg-white border border-gray-200 hover:border-gray-900 rounded-lg transition-colors"
+            >
+              <p className="text-sm font-medium text-gray-900">{opt.title}</p>
+              <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
-      <div className="mb-8 space-y-3">
+      <div className={`mb-8 space-y-3 ${outputMode === 'blueprinter' && preset === null ? 'hidden' : ''}`}>
+        {/* Chosen preset — with a way back */}
+        {outputMode === 'blueprinter' && preset !== null && (
+          <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-sm text-gray-700">
+              {preset === 'clone' && 'Clonar un sitio'}
+              {preset === 'restyle' && 'Cambiar el diseño'}
+              {preset === 'describe' && 'Describirlo yo'}
+              {preset === 'manual' && 'Configurar a mano'}
+            </p>
+            <button
+              onClick={() => setPreset(null)}
+              disabled={isRunning}
+              className="text-xs text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+            >
+              Cambiar
+            </button>
+          </div>
+        )}
+
+        {/* Restyle: where the design comes from */}
+        {preset === 'restyle' && (
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+            <button
+              onClick={() => chooseRestyleSource('url')}
+              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                restyleSource === 'url' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              De otro sitio
+            </button>
+            <button
+              onClick={() => chooseRestyleSource('file')}
+              className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                restyleSource === 'file' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              De mi design.md
+            </button>
+          </div>
+        )}
         {/* Design system source */}
-        {outputMode === 'blueprinter' && (
+        {outputMode === 'blueprinter' && (shows.designSourceRadio || shows.ownDesignBox) && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+            {shows.designSourceRadio && (
+            <>
             <p className="text-sm font-medium text-gray-700">¿De dónde viene el sistema de diseño?</p>
             <label className="flex items-center space-x-2 cursor-pointer">
               <input
@@ -1055,6 +1173,8 @@ export function DesignExtractor() {
               />
               <span className="text-sm text-gray-700">Usar mi propio design.md</span>
             </label>
+            </>
+            )}
 
             {designSource === 'own' && (
               <div className="pt-1">
@@ -1105,6 +1225,7 @@ export function DesignExtractor() {
             </button>
           </div>
         </div>
+        {(outputMode !== 'blueprinter' || shows.copyUrl) && (
         <div>
           <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">{outputMode === 'blueprinter' ? 'URL de texto/copy (opcional)' : 'URL de estructura (opcional)'}</label>
           <input
@@ -1120,7 +1241,8 @@ export function DesignExtractor() {
             <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
           )}
         </div>
-        {outputMode === 'blueprinter' && (
+        )}
+        {outputMode === 'blueprinter' && shows.copySourceRadio && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
             <p className="text-sm font-medium text-gray-700">¿De dónde viene el texto?</p>
             <div className="space-y-2">
@@ -1151,7 +1273,7 @@ export function DesignExtractor() {
             </div>
           </div>
         )}
-        {outputMode === 'blueprinter' && (
+        {outputMode === 'blueprinter' && shows.blueprintCheckbox && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <label className="flex items-start space-x-2 cursor-pointer">
               <input
@@ -1175,7 +1297,7 @@ export function DesignExtractor() {
         {outputMode === 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
             <p className="text-sm font-medium text-gray-700">Imágenes</p>
-            {!isDualUrl && !fillUnsplash ? (
+            {!shows.imageSourceRadio || (!isDualUrl && !fillUnsplash) ? (
               <p className="text-xs text-gray-500">
                 Se toman de {url.trim() ? hostname(url) : 'la URL de arriba'}. Añade una URL de texto/copy
                 si quieres elegir entre dos sitios.
