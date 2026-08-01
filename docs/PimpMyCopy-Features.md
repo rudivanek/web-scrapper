@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.24 | Last Updated: 2026-07-31T15:00:00Z -->
+<!-- Version: 8.25 | Last Updated: 2026-08-01T00:00:00Z -->
 
 ---
 
@@ -2738,6 +2738,45 @@ Replaces the wall of switches with three named jobs plus a manual escape hatch. 
 - Images radio group gated by `shows.imageSourceRadio`; collapses to a sentence otherwise.
 - Unsplash checkbox always visible.
 - The non-Blueprinter path is untouched — every gate is additionally guarded by `outputMode === 'blueprinter'` where the original was.
+
+### Typecheck / Build
+
+- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
+
+---
+
+## config.md — a record of how each extraction was configured (Step 21)
+
+**Added:** 2026-08-01
+
+A fifth output file recording how the run was configured and what came out. Depends on Step 20 (presets) — reads `preset` and `PRESET_LABELS`.
+
+### Why it matters
+
+Settings you might remember; whether design.md came back complete, or whether the fabrication check found anything, you will not. When a build goes wrong weeks later, this file says whether the inputs were sound.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/lib/configReport.ts` | NEW — `buildConfigReport(input)` generates the markdown |
+| `src/components/DesignExtractor.tsx` | Import; `configMd` field on result type; `PRESET_LABELS` map; generate and pass into `setResult`; output panel |
+
+### The report's sections
+
+1. **Header** — site name, timestamp, preset label.
+2. **Orígenes** — a table of where design, text, images and structure each came from.
+3. **Opciones** — section-list on/off, Lorem Ipsum, Unsplash fill, own design.md, layout instructions.
+4. **Resultado** — each file's size, the section count, the fabrication check result, the builder target and format. Flags `INCOMPLETO` on design.md or blueprint.json truncation.
+5. **Notas** — which page to screenshot (the copy URL, not the design URL), hand-edits, Lorem Ipsum warning, incomplete-file warning.
+
+### Key behaviours
+
+- Generated at the end of an extraction; does not re-render when the builder target changes afterwards.
+- `editedByHand` is passed as `false` for now — the field exists for when section-editor edits can be detected.
+- The screenshot note correctly distinguishes dual-URL mode: "adjuntar la de {copyUrl} — no la de {designUrl}."
+- Lorem Ipsum runs get a bold warning: "El texto es de relleno. No entregar esta salida a un cliente como su sitio."
 
 ### Typecheck / Build
 

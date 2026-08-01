@@ -19,6 +19,7 @@ import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
+import { buildConfigReport } from '../lib/configReport';
 import { detectFabricatedText } from '../lib/fabricationCheck';
 import type { FabricationFinding } from '../lib/fabricationCheck';
 
@@ -39,6 +40,7 @@ interface ExtractionResult {
   designMdIncomplete: boolean;
   blueprintIncomplete: boolean;
   fabricationFindings: FabricationFinding[];
+  configMd: string;
   buildMdIncomplete: boolean;
   buildMdHighAssumption: boolean;
   assumptionRatio: number;
@@ -493,6 +495,12 @@ export function DesignExtractor() {
     if (next === 'file') setStructureUrl('');
   };
 
+  const PRESET_LABELS: Record<Preset, string> = {
+    clone: 'Clonar un sitio',
+    restyle: 'Cambiar el diseño',
+    describe: 'Describirlo yo',
+    manual: 'Configurar a mano',
+  };
   const isManual = preset === 'manual';
   /** Which controls this preset needs on screen. Everything else moves to Avanzado. */
   const shows = {
@@ -991,7 +999,30 @@ export function DesignExtractor() {
       if (fabricationFindings.length > 0) {
         console.warn(`[fabrication] ${fabricationFindings.length} blueprint string(s) not found in copy.md`, fabricationFindings);
       }
-      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      // Record of how this run was configured and what came out — see configReport.ts.
+      const configMd = buildConfigReport({
+        siteName: site,
+        designUrl: url.trim(),
+        copyUrl: structureUrl.trim(),
+        presetLabel: preset ? PRESET_LABELS[preset] : null,
+        designSource,
+        ownDesignMdLength: ownDesignMd.trim().length,
+        copyMode,
+        imageSource,
+        fillUnsplash,
+        generateBlueprint,
+        builderTarget: vibeTarget,
+        builderFormat,
+        designMd,
+        designMdIncomplete,
+        copyMd: copyMd ?? null,
+        imagesMd: imagesMd ?? null,
+        blueprintJson,
+        blueprintIncomplete,
+        fabricationCount: fabricationFindings.length,
+        editedByHand: false,
+      });
+      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, configMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
       if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
@@ -1726,6 +1757,17 @@ export function DesignExtractor() {
               icon={<FileText className="w-4 h-4" />}
               content={result.imagesMd}
               filename={`${site}-images.md`}
+              downloadMime="text/markdown"
+            />
+          )}
+
+          {/* config.md — how this run was configured and what came out */}
+          {result.configMd && (
+            <OutputPanel
+              title="config.md"
+              icon={<FileText className="w-4 h-4" />}
+              content={result.configMd}
+              filename={`${site}-config.md`}
               downloadMime="text/markdown"
             />
           )}
