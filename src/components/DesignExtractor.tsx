@@ -12,7 +12,7 @@ import {
 } from '../lib/prompts/designExtractionPrompts';
 import { BUILD_SPEC_FIXED_HEADER, BUILD_SPEC_FOUNDATION_PROMPT, BUILD_SPEC_SECTIONS_PROMPT, BUILD_SPEC_COMPONENTS_PROMPT, buildFoundationUserPrompt, buildSectionsUserPrompt, buildComponentsUserPrompt } from '../lib/prompts/buildSpecPrompt';
 import { extractAssetManifest, enrichManifestWithCss, formatAssetManifestForPrompt } from '../lib/assetExtractor';
-import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget } from '../lib/vibePrompt';
+import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget, type BuildOutputTarget } from '../lib/vibePrompt';
 
 type BuilderFormat = 'html' | 'react';
 import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
@@ -286,6 +286,32 @@ function OutputPanel({
 
 // ─── Vibe Prompt Panel ────────────────────────────────────────────────────────
 
+function buildPromptText(args: {
+  outputMode: 'full' | 'single' | 'blueprinter';
+  vibeTarget: VibeTarget;
+  designMd: string;
+  copyMd: string | null;
+  imagesMd: string | null;
+  buildMd: string | null;
+  blueprintJson: string;
+  provenance: string | null;
+  copyMode: 'scrape' | 'lorem';
+  builderFormat: BuilderFormat;
+}): string {
+  const outputTarget: BuildOutputTarget = args.builderFormat === 'react' ? 'react-tailwind' : 'plain-html';
+  return args.outputMode === 'blueprinter' && args.copyMd && args.designMd
+    ? buildBlueprinterPrompt(
+        args.vibeTarget, args.designMd, args.copyMd,
+        args.imagesMd ?? undefined, args.copyMode === 'lorem',
+        args.builderFormat, args.blueprintJson,
+      )
+    : buildVibePrompt(
+        args.vibeTarget,
+        { buildMd: args.buildMd ?? '', blueprintJson: args.blueprintJson, provenance: args.provenance },
+        outputTarget,
+      );
+}
+
 function VibePromptPanel({
   buildMd, blueprintJson, provenance, buildTarget, vibeTarget, onTargetChange,
   outputMode, copyMd, imagesMd, designMd, copyMode, siteName, builderFormat, onFormatChange,
@@ -308,15 +334,18 @@ function VibePromptPanel({
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const outputTarget: BuildOutputTarget = builderFormat === 'react' ? 'react-tailwind' : 'plain-html';
-
-  const prompt = outputMode === 'blueprinter' && copyMd && designMd
-    ? buildBlueprinterPrompt(vibeTarget, designMd, copyMd, imagesMd ?? undefined, copyMode === 'lorem', builderFormat, blueprintJson)
-    : buildVibePrompt(
-        vibeTarget,
-        { buildMd: buildMd ?? '', blueprintJson, provenance },
-        outputTarget,
-      );
+  const prompt = buildPromptText({
+    outputMode,
+    vibeTarget,
+    designMd,
+    copyMd,
+    imagesMd,
+    buildMd,
+    blueprintJson,
+    provenance,
+    copyMode,
+    builderFormat,
+  });
 
   return (
     <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
@@ -340,7 +369,7 @@ function VibePromptPanel({
               const dlUrl = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = dlUrl;
-              a.download = `1-PROMPT_${siteName}-prompt-${vibeTarget}.md`;
+              a.download = `PASTE_PROMPT_${siteName}-${vibeTarget}.md`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -438,6 +467,7 @@ export function DesignExtractor() {
   const [structureUrlError, setStructureUrlError] = useState<string | null>(null);
   const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('blueprinter');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const [builderFormat, setBuilderFormat] = useState<BuilderFormat>('html');
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
@@ -1544,7 +1574,7 @@ export function DesignExtractor() {
                     if (!result.screenshot) return;
                     setScreenshotDownloading(true);
                     try {
-                      await downloadScreenshot(result.screenshot, `2-SCREENSHOT_${site}.png`);
+                      await downloadScreenshot(result.screenshot, `UPLOAD_SCREENSHOT_${site}.png`);
                     } catch (e) {
                       console.warn('[screenshot] download failed:', e);
                     } finally {
@@ -1687,7 +1717,7 @@ export function DesignExtractor() {
               title="design.md"
               icon={<Palette className="w-4 h-4" />}
               content={result.designMd}
-              filename={`5-INPUT_${site}-design.md`}
+              filename={`UPLOAD_DESIGN_${site}.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1769,7 +1799,7 @@ export function DesignExtractor() {
               title="copy.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.copyMd}
-              filename={`5-INPUT_${site}-copy.md`}
+              filename={`UPLOAD_COPY_${site}.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1780,7 +1810,7 @@ export function DesignExtractor() {
               title="images.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.imagesMd}
-              filename={`5-INPUT_${site}-images.md`}
+              filename={`UPLOAD_IMAGES_${site}.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1791,7 +1821,7 @@ export function DesignExtractor() {
               title="config.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.configMd}
-              filename={`3-CONFIG_${site}-config.md`}
+              filename={`CONFIG_${site}.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1804,7 +1834,7 @@ export function DesignExtractor() {
               title="blueprint.json"
               icon={<Layers className="w-4 h-4" />}
               content={result.blueprintJson}
-              filename={`4-BLUEPRINT_${site}-blueprint.json`}
+              filename={`UPLOAD_BLUEPRINT_${site}.json`}
               downloadMime="application/json"
             />
           )}
@@ -1822,7 +1852,7 @@ export function DesignExtractor() {
               title={result.outputMode === 'single' ? 'Design Spec (para LLM)' : 'BUILD.md — Reconstruction Spec'}
               icon={<FileDown className="w-4 h-4" />}
               content={result.buildMd}
-              filename={result.outputMode === 'single' ? `5-INPUT_${site}-design-spec.md` : `5-INPUT_${site}-BUILD.md`}
+              filename={result.outputMode === 'single' ? `UPLOAD_SPEC_${site}.md` : `UPLOAD_BUILD_${site}.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1861,17 +1891,69 @@ ${result.blueprintJson}
                 </button>
               )}
               <button
-                onClick={() => {
-                  downloadFile(result.designMd, `5-INPUT_${site}-design.md`, 'text/markdown');
-                  setTimeout(() => downloadFile(result.blueprintJson, `4-BLUEPRINT_${site}-blueprint.json`, 'application/json'), 300);
-                  if (result.buildMd) {
-                    setTimeout(() => downloadFile(result.buildMd!, `5-INPUT_${site}-BUILD.md`, 'text/markdown'), 600);
+                onClick={async () => {
+                  if (downloadingAll) return;
+                  setDownloadingAll(true);
+                  const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+                  try {
+                    const promptText = buildPromptText({
+                      outputMode: result.outputMode,
+                      vibeTarget,
+                      designMd: result.designMd,
+                      copyMd: result.copyMd,
+                      imagesMd: result.imagesMd,
+                      buildMd: result.buildMd,
+                      blueprintJson: result.blueprintJson,
+                      provenance: result.provenance,
+                      copyMode,
+                      builderFormat,
+                    });
+
+                    downloadFile(promptText, `PASTE_PROMPT_${site}-${vibeTarget}.md`, 'text/markdown');
+                    await wait(350);
+
+                    if (result.screenshot) {
+                      try {
+                        await downloadScreenshot(result.screenshot, `UPLOAD_SCREENSHOT_${site}.png`);
+                      } catch (e) {
+                        console.warn('[downloadAll] screenshot failed:', e);
+                      }
+                      await wait(350);
+                    }
+
+                    downloadFile(result.blueprintJson, `UPLOAD_BLUEPRINT_${site}.json`, 'application/json');
+                    await wait(350);
+
+                    downloadFile(result.designMd, `UPLOAD_DESIGN_${site}.md`, 'text/markdown');
+                    await wait(350);
+
+                    if (result.copyMd) {
+                      downloadFile(result.copyMd, `UPLOAD_COPY_${site}.md`, 'text/markdown');
+                      await wait(350);
+                    }
+                    if (result.imagesMd) {
+                      downloadFile(result.imagesMd, `UPLOAD_IMAGES_${site}.md`, 'text/markdown');
+                      await wait(350);
+                    }
+                    if (result.buildMd) {
+                      const buildName = result.outputMode === 'single'
+                        ? `UPLOAD_SPEC_${site}.md`
+                        : `UPLOAD_BUILD_${site}.md`;
+                      downloadFile(result.buildMd, buildName, 'text/markdown');
+                      await wait(350);
+                    }
+                    if (result.configMd) {
+                      downloadFile(result.configMd, `CONFIG_${site}.md`, 'text/markdown');
+                    }
+                  } finally {
+                    setDownloadingAll(false);
                   }
                 }}
-                className="flex items-center space-x-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 transition-colors rounded"
+                disabled={downloadingAll}
+                className="flex items-center space-x-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800 transition-colors rounded disabled:opacity-60"
               >
-                <FileDown className="w-4 h-4" />
-                <span>Download All Files</span>
+                {downloadingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                <span>{downloadingAll ? 'Descargando...' : 'Descargar todos los archivos'}</span>
               </button>
             </div>
           )}
