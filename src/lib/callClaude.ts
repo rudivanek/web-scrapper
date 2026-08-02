@@ -86,25 +86,56 @@ export async function callClaudeWithMeta(
   const decoder = new TextDecoder();
   let fullText = '';
   let stopReason: string | null = null;
+  let buffer = '';
+  let droppedEvents = 0;
+
+  /** Parse one complete SSE line. Only ever called with a whole line. */
+  const handleLine = (rawLine: string) => {
+    const line = rawLine.trimEnd();
+    if (!line.startsWith('data:')) return;
+    const jsonStr = line.slice(5).trim();
+    if (jsonStr === '' || jsonStr === '[DONE]') return;
+    try {
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+        fullText += parsed.delta.text;
+      }
+      if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
+        stopReason = parsed.delta.stop_reason;
+      }
+      if (parsed.type === 'error') {
+        console.error('[stream] API error event:', parsed.error);
+      }
+    } catch {
+      // A complete SSE line that will not parse is a genuine problem, not a
+      // chunk-boundary artifact. Never swallow it silently.
+      droppedEvents++;
+      console.error('[stream] dropped an unparseable SSE event:', jsonStr.slice(0, 200));
+    }
+  };
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
-    for (const line of lines) {
-      const jsonStr = line.replace('data: ', '').trim();
-      if (jsonStr === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(jsonStr);
-        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-          fullText += parsed.delta.text;
-        }
-        if (parsed.type === 'message_delta' && parsed.delta?.stop_reason) {
-          stopReason = parsed.delta.stop_reason;
-        }
-      } catch (_) {}
+    buffer += decoder.decode(value, { stream: true });
+
+    // Everything up to the last newline is complete. Whatever follows it is a
+    // partial line and MUST stay in the buffer until the rest of it arrives.
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      handleLine(line);
     }
+  }
+
+  // Flush the decoder and whatever is left in the buffer — the final event may
+  // arrive without a trailing newline.
+  buffer += decoder.decode();
+  if (buffer.trim() !== '') handleLine(buffer);
+
+  if (droppedEvents > 0) {
+    console.error(`[stream] ${droppedEvents} SSE event(s) were dropped — output may be incomplete.`);
   }
 
   return { text: fullText, stopReason };
