@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.27 | Last Updated: 2026-08-01T02:00:00Z -->
+<!-- Version: 8.25 | Last Updated: 2026-08-01T00:00:00Z -->
 
 ---
 
@@ -2777,62 +2777,6 @@ Settings you might remember; whether design.md came back complete, or whether th
 - `editedByHand` is passed as `false` for now — the field exists for when section-editor edits can be detected.
 - The screenshot note correctly distinguishes dual-URL mode: "adjuntar la de {copyUrl} — no la de {designUrl}."
 - Lorem Ipsum runs get a bold warning: "El texto es de relleno. No entregar esta salida a un cliente como su sitio."
-
-### Typecheck / Build
-
-- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
-- `npm run build`: succeeded, exit 0.
-
----
-
-## Prefixed download filenames (Step 23)
-
-**Added:** 2026-08-01
-
-An extraction produces up to seven downloads and nothing in the names said which one goes to the builder. Every filename is now prefixed so they sort in the order they are used.
-
-### Sorted result in a downloads folder
-
-```
-1-PROMPT_cliente.mx-prompt-lovable.md      ← paste into the builder
-2-SCREENSHOT_cliente.mx.png                ← attach to the builder
-3-CONFIG_cliente.mx-config.md              ← how this run was configured
-4-BLUEPRINT_cliente.mx-blueprint.json      ← the section list
-5-INPUT_cliente.mx-copy.md                 ← already inside the prompt
-5-INPUT_cliente.mx-design.md
-5-INPUT_cliente.mx-images.md
-```
-
-### Why the numbers matter
-
-Without them `BLUEPRINT` and `CONFIG` sort above `PROMPT`, burying the two files that actually get uploaded. The `5-INPUT_` files are reference copies — in Blueprinter mode their contents are already embedded inside the prompt, so they do not get uploaded separately.
-
-### Files changed
-
-| File | Change |
-|---|---|
-| `src/components/DesignExtractor.tsx` | Eight filename prefixes: prompt (1), screenshot (2), config (3), blueprint (4), design/copy/images/BUILD (5) |
-| `src/components/section-editor/SectionEditorPanel.tsx` | Blueprint download matches the output panel's `4-BLUEPRINT_` prefix |
-
-### Typecheck / Build
-
-- `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
-- `npm run build`: succeeded, exit 0.
-
-**Added:** 2026-08-01
-
-The app already captures a full-page screenshot during extraction (Firecrawl's `screenshot@fullPage`), feeds it to the blueprint, and shows it as a preview — but there was no way to download it, forcing users to re-screenshot the same page with an external tool. The external screenshot is worse: it captures whatever the viewport showed at an arbitrary moment, while the app's is a full-page capture of exactly what was scraped, at the moment it was scraped.
-
-### What changed
-
-One file: `src/components/DesignExtractor.tsx`, two edits.
-
-1. **`downloadScreenshot` helper** — handles all three Firecrawl response shapes (data URI, bare base64, remote URL) and triggers a browser download as a `.png`. Mirrors the same three-way branching already in `imagePrep.ts`'s `prepareScreenshot`.
-2. **Button and note in the screenshot preview** — a "Descargar" button in the preview's title bar, and a caption below the image naming the captured page and instructing the user to attach it to the builder.
-
-### Why the screenshot matters
-
-In dual-URL mode the app captures the *structure* page (the copy URL), which is the one that must be attached to the builder prompt and the one that is easy to get wrong. The download button removes the guesswork.
 
 ### Typecheck / Build
 

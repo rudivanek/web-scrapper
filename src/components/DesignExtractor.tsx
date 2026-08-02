@@ -340,7 +340,7 @@ function VibePromptPanel({
               const dlUrl = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = dlUrl;
-              a.download = `1-PROMPT_${siteName}-prompt-${vibeTarget}.md`;
+              a.download = `${siteName}-prompt-${vibeTarget}.md`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -1042,33 +1042,6 @@ export function DesignExtractor() {
     runExtraction();
   };
 
-  /**
-   * Firecrawl returns the screenshot as a data URI, bare base64, or a remote URL,
-   * depending on the response. Handle all three so the download always works.
-   */
-  const downloadScreenshot = async (source: string, filename: string) => {
-    try {
-      let blob: Blob;
-      if (source.startsWith('http')) {
-        blob = await (await fetch(source)).blob();
-      } else {
-        const base64 = source.startsWith('data:') ? source.split(',')[1] : source;
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-        blob = new Blob([bytes], { type: 'image/png' });
-      }
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch (e) {
-      console.error('[screenshot] download failed', e);
-    }
-  };
-
   const isRunning = ['scrape-design', 'scrape-structure', 'fetch-css', 'llm-design', 'llm-blueprint', 'llm-buildspec'].includes(state.phase);
   const site = hostname(structureUrl.trim() || url);
 
@@ -1559,25 +1532,12 @@ export function DesignExtractor() {
                 <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-                <span className="ml-2 text-xs text-gray-400 font-mono truncate flex items-center space-x-1.5 flex-1 min-w-0">
-                  <Eye className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{structureUrl.trim() || url}</span>
+                <span className="ml-2 text-xs text-gray-400 font-mono truncate flex items-center space-x-1.5">
+                  <Eye className="w-3 h-3" />
+                  <span>{structureUrl.trim() || url}</span>
                 </span>
-                <button
-                  onClick={() => downloadScreenshot(result.screenshot as string, `2-SCREENSHOT_${site}.png`)}
-                  className="shrink-0 flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium bg-gray-900 text-white hover:bg-gray-800 rounded transition-colors"
-                >
-                  <FileDown className="w-3 h-3" />
-                  <span>Descargar</span>
-                </button>
               </div>
               <img src={result.screenshot} alt="Page screenshot" className="w-full object-cover max-h-64" />
-              <div className="px-3 py-2 border-t border-gray-200 bg-white">
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  Captura completa de {structureUrl.trim() || url}, tomada durante la extracción.
-                  Adjúntala al builder junto con el prompt — es la página cuyo texto y estructura estás usando.
-                </p>
-              </div>
             </div>
           )}
 
@@ -1703,7 +1663,7 @@ export function DesignExtractor() {
               title="design.md"
               icon={<Palette className="w-4 h-4" />}
               content={result.designMd}
-              filename={`5-INPUT_${site}-design.md`}
+              filename={`${site}-design.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1785,7 +1745,7 @@ export function DesignExtractor() {
               title="copy.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.copyMd}
-              filename={`5-INPUT_${site}-copy.md`}
+              filename={`${site}-copy.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1796,7 +1756,7 @@ export function DesignExtractor() {
               title="images.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.imagesMd}
-              filename={`5-INPUT_${site}-images.md`}
+              filename={`${site}-images.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1807,7 +1767,7 @@ export function DesignExtractor() {
               title="config.md"
               icon={<FileText className="w-4 h-4" />}
               content={result.configMd}
-              filename={`3-CONFIG_${site}-config.md`}
+              filename={`${site}-config.md`}
               downloadMime="text/markdown"
             />
           )}
@@ -1820,7 +1780,7 @@ export function DesignExtractor() {
               title="blueprint.json"
               icon={<Layers className="w-4 h-4" />}
               content={result.blueprintJson}
-              filename={`4-BLUEPRINT_${site}-blueprint.json`}
+              filename={`${site}-blueprint.json`}
               downloadMime="application/json"
             />
           )}
@@ -1838,7 +1798,7 @@ export function DesignExtractor() {
               title={result.outputMode === 'single' ? 'Design Spec (para LLM)' : 'BUILD.md — Reconstruction Spec'}
               icon={<FileDown className="w-4 h-4" />}
               content={result.buildMd}
-              filename={result.outputMode === 'single' ? `5-INPUT_${site}-design-spec.md` : `5-INPUT_${site}-BUILD.md`}
+              filename={result.outputMode === 'single' ? `${site}-design-spec.md` : `${site}-BUILD.md`}
               downloadMime="text/markdown"
             />
           )}
