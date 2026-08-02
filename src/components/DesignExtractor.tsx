@@ -20,6 +20,7 @@ import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from 
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
 import { buildConfigReport, parseConfigSettings } from '../lib/configReport';
+import { analyzeFonts, summarizeFonts, needsFontAttention, type FontAnalysis } from '../lib/fontSubstitution';
 import { detectFabricatedText } from '../lib/fabricationCheck';
 import type { FabricationFinding } from '../lib/fabricationCheck';
 
@@ -61,6 +62,7 @@ interface ExtractionResult {
   copyMd: string | null;
   copyProvenance: string | null;
   imagesMd: string | null;
+  fontAnalysis: FontAnalysis;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -1075,6 +1077,7 @@ export function DesignExtractor() {
         console.warn(`[fabrication] ${fabricationFindings.length} blueprint string(s) not found in copy.md`, fabricationFindings);
       }
       // Record of how this run was configured and what came out — see configReport.ts.
+      const fontAnalysis = analyzeFonts(designMd);
       const configMd = buildConfigReport({
         siteName: site,
         designUrl: url.trim(),
@@ -1110,8 +1113,9 @@ export function DesignExtractor() {
           vibeTarget,
           builderFormat,
         },
+        fontNotes: summarizeFonts(fontAnalysis),
       });
-      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, configMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
+      setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, configMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd, fontAnalysis });
       if (soundEnabled) playDoneSound('success');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Extraction failed';
@@ -1677,6 +1681,18 @@ export function DesignExtractor() {
             <div className="flex items-center space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>Verificación visual no disponible — el análisis se basó únicamente en el CSS.</span>
+            </div>
+          )}
+
+          {result.fontAnalysis && needsFontAttention(result.fontAnalysis) && (
+            <div className="flex items-start space-x-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-medium">Tipografía sustituida</p>
+                {summarizeFonts(result.fontAnalysis).map((n, i) => (
+                  <p key={i} className="text-xs">{n.replace(/^- /, '').replace(/\*\*/g, '')}</p>
+                ))}
+              </div>
             </div>
           )}
 

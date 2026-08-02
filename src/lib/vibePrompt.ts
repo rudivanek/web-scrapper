@@ -1,3 +1,5 @@
+import { analyzeFonts, buildFontDirective } from './fontSubstitution';
+
 export type VibeTarget = 'lovable' | 'bolt' | 'v0' | 'claude-design' | 'replit' | 'generic';
 
 export const VIBE_TARGETS: { id: VibeTarget; label: string }[] = [
@@ -583,8 +585,9 @@ function formatBlueprintForPrompt(blueprintJson?: string): string {
   return lines.join('\n').trimEnd();
 }
 
-export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html', blueprintJson?: string): string {
+export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, copyMd: string, imagesMd?: string, isLorem?: boolean, builderFormat: 'html' | 'react' = 'html', blueprintJson?: string, fontOverrides: Record<string, string> = {}): string {
   const targetLabel = VIBE_TARGETS.find(t => t.id === target)?.label ?? 'your builder';
+  const fontDirective = buildFontDirective(analyzeFonts(designMd), fontOverrides);
 
   // Free mode replaces the section list entirely — sending both would hand the builder two
   // competing descriptions of the same page.
@@ -657,6 +660,10 @@ ${designMd}
 
 ---
 
+${fontDirective}
+
+---
+
 ## copy.md
 
 \`\`\`markdown
@@ -672,13 +679,14 @@ export function buildVibePrompt(
   buildTarget: BuildOutputTarget = 'react-tailwind',
 ): string {
   const outputTarget: BuildOutputTarget = buildTarget === 'react-tailwind' ? 'react-tailwind' : 'plain-html';
+  const fontDirective = buildFontDirective(analyzeFonts(input.buildMd));
 
   switch (target) {
-    case 'lovable': return buildLovablePrompt(input, outputTarget);
-    case 'bolt': return buildBoltPrompt(input, outputTarget);
-    case 'v0': return buildV0Prompt(input, outputTarget);
-    case 'claude-design': return buildClaudeDesignPrompt(input, outputTarget);
-    case 'replit': return buildReplitPrompt(input, outputTarget);
-    case 'generic': return buildGenericPrompt(input, outputTarget);
+    case 'lovable': return buildLovablePrompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
+    case 'bolt': return buildBoltPrompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
+    case 'v0': return buildV0Prompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
+    case 'claude-design': return buildClaudeDesignPrompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
+    case 'replit': return buildReplitPrompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
+    case 'generic': return buildGenericPrompt(input, outputTarget) + '\n\n---\n\n' + fontDirective;
   }
 }

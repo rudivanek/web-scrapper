@@ -44,6 +44,7 @@ export interface ConfigReportInput {
   fabricationCount: number;
   editedByHand: boolean;
   settings: ReusableSettings;
+  fontNotes: string[];
 }
 
 function kb(text: string | null | undefined): string {
@@ -156,6 +157,7 @@ export function buildConfigReport(input: ConfigReportInput): string {
   if (sectionCount !== null) {
     lines.push(`- blueprint.json — ${sectionCount} ${sectionCount === 1 ? 'sección' : 'secciones'}${blueprintIncomplete ? ' — **INCOMPLETO o JSON inválido**' : ''}`);
   }
+  for (const note of input.fontNotes) lines.push(note);
   lines.push(
     fabricationCount > 0
       ? `- Revisión de invención: **${fabricationCount} ${fabricationCount === 1 ? 'frase' : 'frases'} no encontradas en la página** — verificar antes de entregar`
