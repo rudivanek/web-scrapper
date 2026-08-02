@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX, HelpCircle, Download } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX, HelpCircle, Download, Upload } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callWithContinuation } from '../lib/callClaude';
 import { prepareScreenshot, downloadScreenshot } from '../lib/imagePrep';
@@ -19,7 +19,7 @@ import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
 import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
-import { buildConfigReport } from '../lib/configReport';
+import { buildConfigReport, parseConfigSettings } from '../lib/configReport';
 import { detectFabricatedText } from '../lib/fabricationCheck';
 import type { FabricationFinding } from '../lib/fabricationCheck';
 
@@ -468,6 +468,50 @@ export function DesignExtractor() {
   const [outputMode, setOutputMode] = useState<'full' | 'single' | 'blueprinter'>('blueprinter');
   const [vibeTarget, setVibeTarget] = useState<VibeTarget>('lovable');
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [configLoadMsg, setConfigLoadMsg] = useState<string | null>(null);
+
+  const loadConfigFile = async (file: File) => {
+    setConfigLoadMsg(null);
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setConfigLoadMsg('No se pudo leer el archivo.');
+      return;
+    }
+
+    const parsed = parseConfigSettings(text);
+    if (!parsed) {
+      setConfigLoadMsg('Ese archivo no contiene un bloque de configuración válido. Usa un CONFIG_*.md generado por esta app.');
+      return;
+    }
+
+    const s = parsed.settings;
+
+    // Set preset directly. Do NOT call applyPreset — it would overwrite every
+    // field below with the preset's defaults, which is exactly what we are restoring.
+    if (s.preset !== undefined) setPreset(s.preset);
+    if (s.restyleSource !== undefined) setRestyleSource(s.restyleSource);
+    if (s.url !== undefined) setUrl(s.url);
+    if (s.structureUrl !== undefined) setStructureUrl(s.structureUrl);
+    if (s.designSource !== undefined) setDesignSource(s.designSource);
+    if (s.copyMode !== undefined) setCopyMode(s.copyMode);
+    if (s.copySource !== undefined) setCopySource(s.copySource);
+    if (s.imageSource !== undefined) setImageSource(s.imageSource);
+    if (s.fillUnsplash !== undefined) setFillUnsplash(s.fillUnsplash);
+    if (s.generateBlueprint !== undefined) setGenerateBlueprint(s.generateBlueprint);
+    if (s.vibeTarget !== undefined) setVibeTarget(s.vibeTarget as VibeTarget);
+    if (s.builderFormat !== undefined) setBuilderFormat(s.builderFormat);
+
+    const notes: string[] = ['Configuración cargada.'];
+    if (s.designSource === 'own') {
+      notes.push('Esta configuración usaba un design.md propio — vuelve a pegarlo, no se guarda en config.md.');
+    }
+    if (parsed.rejected.length > 0) {
+      notes.push(`Se ignoraron campos no válidos: ${parsed.rejected.join(', ')}.`);
+    }
+    setConfigLoadMsg(notes.join(' '));
+  };
   const [builderFormat, setBuilderFormat] = useState<BuilderFormat>('html');
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
@@ -1052,6 +1096,20 @@ export function DesignExtractor() {
         blueprintIncomplete,
         fabricationCount: fabricationFindings.length,
         editedByHand: false,
+        settings: {
+          url: url.trim(),
+          structureUrl: structureUrl.trim(),
+          preset,
+          restyleSource,
+          designSource,
+          copyMode,
+          copySource,
+          imageSource,
+          fillUnsplash,
+          generateBlueprint,
+          vibeTarget,
+          builderFormat,
+        },
       });
       setResult({ designMd, blueprintJson, buildMd, designMdIncomplete, blueprintIncomplete, fabricationFindings, configMd, buildMdIncomplete, buildMdHighAssumption, assumptionRatio, assumptionCount, valueCount, screenshot, screenshotAvailable: screenshotSegments.length > 0, externalSheets, cssDegraded, cssLooksInsufficient, insufficientReasons, platform, buildTarget, provenance: provenanceLine, platformMismatch, platformMismatchNote, outputMode, copyMd, copyProvenance, imagesMd });
       if (soundEnabled) playDoneSound('success');
@@ -1164,6 +1222,25 @@ export function DesignExtractor() {
               <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{opt.desc}</p>
             </button>
           ))}
+          <div className="pt-3 mt-3 border-t border-gray-200">
+            <label className="inline-flex items-center gap-2 text-xs text-gray-600 hover:text-gray-900 cursor-pointer transition-colors">
+              <Upload className="w-3.5 h-3.5" />
+              <span>Cargar configuración de una extracción anterior</span>
+              <input
+                type="file"
+                accept=".md,text/markdown"
+                className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) loadConfigFile(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {configLoadMsg && (
+              <p className="mt-2 text-xs text-gray-500">{configLoadMsg}</p>
+            )}
+          </div>
         </div>
       )}
 
