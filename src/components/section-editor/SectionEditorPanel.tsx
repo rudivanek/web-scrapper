@@ -87,7 +87,7 @@ export function SectionEditorPanel({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${siteName || 'blueprint'}-blueprint.json`;
+    a.download = `4-BLUEPRINT_${siteName || 'blueprint'}-blueprint.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
