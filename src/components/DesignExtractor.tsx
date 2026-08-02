@@ -1866,7 +1866,7 @@ export function DesignExtractor() {
           )}
 
           {/* Quick-download all + copy for builder — hidden in single-file mode */}
-          {result.outputMode === 'full' && (
+          {result.outputMode !== 'single' && (
             <div className="flex items-center justify-end gap-3 pt-2">
               {result.buildMd && (
                 <button
