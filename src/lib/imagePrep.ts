@@ -116,3 +116,29 @@ export async function prepareScreenshot(base64OrUrl: string): Promise<string[]> 
     return [];
   }
 }
+
+/**
+ * Download the full-page screenshot. Handles Firecrawl's hosted URL, a data: URI,
+ * or bare base64. A cross-origin <a download> is ignored by browsers, so hosted
+ * URLs are fetched into a blob first.
+ */
+export async function downloadScreenshot(src: string, filename: string): Promise<void> {
+  let objectUrl: string | null = null;
+  let href: string;
+
+  if (src.startsWith('http')) {
+    objectUrl = await fetchAsBlobUrl(src);
+    href = objectUrl;
+  } else if (src.startsWith('data:')) {
+    href = src;
+  } else {
+    href = `data:image/png;base64,${src}`;
+  }
+
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  a.click();
+
+  if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl!), 2000);
+}

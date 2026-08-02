@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX, HelpCircle } from 'lucide-react';
+import { Loader2, Palette, FileDown, AlertCircle, AlertTriangle, Check, Copy, ChevronDown, ChevronUp, Layers, Eye, Clipboard, FileText, Volume2, VolumeX, HelpCircle, Download } from 'lucide-react';
 import { callFirecrawl, extractCssData, type CssExtractResultWithDiagnostics, type PlatformDetection } from '../lib/firecrawl';
 import { callWithContinuation } from '../lib/callClaude';
-import { prepareScreenshot } from '../lib/imagePrep';
+import { prepareScreenshot, downloadScreenshot } from '../lib/imagePrep';
 import { preprocessHtml } from '../lib/htmlPreprocess';
 import {
   DESIGN_SYSTEM_PROMPT,
@@ -442,6 +442,7 @@ export function DesignExtractor() {
   const [fillUnsplash, setFillUnsplash] = useState(false);
   const [imageSource, setImageSource] = useState<ImageSourceMode>('design');
   const [copyMode, setCopyMode] = useState<'scrape' | 'lorem'>('scrape');
+  const [screenshotDownloading, setScreenshotDownloading] = useState(false);
   // Blueprint composed by hand when no extraction has run (section editor, composer mode).
   const [manualBlueprint, setManualBlueprint] = useState('');
   // Opt-in: also generate the section list (blueprint JSON) in Blueprinter mode, so the
@@ -1536,6 +1537,27 @@ export function DesignExtractor() {
                   <Eye className="w-3 h-3" />
                   <span>{structureUrl.trim() || url}</span>
                 </span>
+                <button
+                  onClick={async () => {
+                    if (!result.screenshot) return;
+                    setScreenshotDownloading(true);
+                    try {
+                      await downloadScreenshot(result.screenshot, `2-SCREENSHOT_${site}.png`);
+                    } catch (e) {
+                      console.warn('[screenshot] download failed:', e);
+                    } finally {
+                      setScreenshotDownloading(false);
+                    }
+                  }}
+                  disabled={screenshotDownloading}
+                  title="Descargar screenshot de página completa"
+                  className="ml-auto shrink-0 flex items-center space-x-1.5 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors disabled:opacity-50"
+                >
+                  {screenshotDownloading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Download className="w-3 h-3" />}
+                  <span>Descargar</span>
+                </button>
               </div>
               <img src={result.screenshot} alt="Page screenshot" className="w-full object-cover max-h-64" />
             </div>
