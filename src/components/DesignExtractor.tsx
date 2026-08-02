@@ -1529,14 +1529,16 @@ export function DesignExtractor() {
           {/* Screenshot preview */}
           {result.screenshot && (
             <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <div className="bg-gray-100 px-3 py-1.5 flex items-center space-x-1.5 border-b border-gray-200">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-                <span className="ml-2 text-xs text-gray-400 font-mono truncate flex items-center space-x-1.5">
-                  <Eye className="w-3 h-3" />
-                  <span>{structureUrl.trim() || url}</span>
-                </span>
+              <div className="bg-gray-100 px-3 py-1.5 flex items-center justify-between gap-2 border-b border-gray-200">
+                <div className="flex items-center space-x-1.5 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
+                  <span className="ml-2 text-xs text-gray-400 font-mono flex items-center space-x-1.5 min-w-0">
+                    <Eye className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{structureUrl.trim() || url}</span>
+                  </span>
+                </div>
                 <button
                   onClick={async () => {
                     if (!result.screenshot) return;
@@ -1551,7 +1553,7 @@ export function DesignExtractor() {
                   }}
                   disabled={screenshotDownloading}
                   title="Descargar screenshot de página completa"
-                  className="ml-auto shrink-0 flex items-center space-x-1.5 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors disabled:opacity-50"
+                  className="shrink-0 flex items-center space-x-1.5 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors disabled:opacity-50"
                 >
                   {screenshotDownloading
                     ? <Loader2 className="w-3 h-3 animate-spin" />
