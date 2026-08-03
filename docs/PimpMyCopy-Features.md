@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.28 | Last Updated: 2026-08-03T00:00:00Z -->
+<!-- Version: 8.29 | Last Updated: 2026-08-03T00:00:00Z -->
 
 ---
 
@@ -2933,3 +2933,45 @@ The hardcoded four-label block in the preset chooser was replaced with `{preset 
 - Picking "Traer mi propio contenido" on a fresh load: section editor opens in Libre with "Este texto es el copy final" already ticked, image source is Unsplash, section-list generation is off.
 - Picking it when a blueprint already has content: the existing blueprint is NOT overwritten.
 - Save a config.md from the new preset and re-upload it: the preset comes back as "Traer mi propio contenido", not dropped.
+
+---
+
+## Free-form structure never reaches the builder prompt — FIX (Step 31)
+
+**Added:** 2026-08-03
+
+**Critical bug.** Text typed into the section editor's Libre (free) mode never entered the generated prompt. Every "Traer mi propio contenido" and "Describirlo yo" run silently fell back to the scraped copy instead of the user's own.
+
+### The chain of failure
+
+1. Both presets set `generateBlueprint: false`, so the extraction skipped the blueprint call and `blueprintJson` stayed `''` (empty).
+2. The section editor wrote the user's free-form text into a DIFFERENT variable, `manualBlueprint`.
+3. `VibePromptPanel` received `blueprintJson={result.blueprintJson}` — the empty one.
+4. In `vibePrompt.ts`, `blueprintFreeForm('')` returned `''`, so `isFreeMode` was false, `free_form_is_copy` was never read, and the free-form section was omitted.
+5. With free mode off, `copy.md` remained the authoritative copy — the scraped site's text. The builder produced the original site's words.
+
+### The fix
+
+A single derived value, `effectiveBlueprintJson`, was added to the main component. It resolves to `result.blueprintJson` when a blueprint was generated (Clone, Restyle), and falls back to `manualBlueprint` when the extraction produced no blueprint (Describe, Content — free mode). This value is now used in all three places that feed the prompt:
+
+1. **VibePromptPanel** — `blueprintJson={effectiveBlueprintJson}` (was `result.blueprintJson`)
+2. **Download All handler** — `blueprintJson: effectiveBlueprintJson` (was `result.blueprintJson`, so the downloaded `PASTE_PROMPT_*.md` and the on-screen prompt now agree)
+3. **Section editor call site** — `blueprintJson={effectiveBlueprintJson}` (was an inline expression that did the same thing; now shared so the three cannot drift)
+
+### Why this is safe
+
+When a blueprint WAS generated, `result.blueprintJson` is non-empty and wins — behaviour is unchanged for Clone and Restyle. The fallback only applies when the extraction produced no blueprint, which is exactly when `manualBlueprint` holds the user's own structure.
+
+### Files Changed (exactly one)
+
+| File | Change |
+|---|---|
+| `src/components/DesignExtractor.tsx` | Added `effectiveBlueprintJson` derived value; used it in VibePromptPanel, Download All handler, and section editor call site |
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in the modified file.
+- `npm run build`: succeeded, exit 0.
+- "Traer mi propio contenido" with text pasted into Libre: the generated prompt now contains a `## Page structure (authoritative)` section with that text, and does NOT contain a `## copy.md` section.
+- "Clonar un sitio": the prompt contains the generated section list exactly as before.
+- The prompt shown on screen and the downloaded `PASTE_PROMPT_*.md` are identical in both cases.

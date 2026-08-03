@@ -613,6 +613,14 @@ export function DesignExtractor() {
 
   const isDualUrl = structureUrl.trim().length > 0 && normalizeUrl(url) !== normalizeUrl(structureUrl);
 
+  /**
+   * The blueprint the prompt should use. When section-list generation is off the
+   * extraction produces no blueprint, and the user's own structure — including free
+   * mode and the free_form_is_copy flag — lives in manualBlueprint instead.
+   */
+  const effectiveBlueprintJson =
+    result && result.blueprintJson.trim() ? result.blueprintJson : manualBlueprint;
+
   const setPhase = (phase: ExtractionState['phase'], message: string, progress: number) => {
     setState({ phase, message, progress });
   };
@@ -1630,7 +1638,7 @@ export function DesignExtractor() {
 
       {/* Section editor — available with or without an extraction */}
       <SectionEditorPanel
-        blueprintJson={result && result.blueprintJson.trim() ? result.blueprintJson : manualBlueprint}
+        blueprintJson={effectiveBlueprintJson}
         onChange={json => {
           if (result && result.blueprintJson.trim()) {
             setResult(prev => (prev ? { ...prev, blueprintJson: json } : prev));
@@ -2022,7 +2030,7 @@ ${result.blueprintJson}
                       copyMd: result.copyMd,
                       imagesMd: result.imagesMd,
                       buildMd: result.buildMd,
-                      blueprintJson: result.blueprintJson,
+                      blueprintJson: effectiveBlueprintJson,
                       provenance: result.provenance,
                       copyMode,
                       builderFormat,
@@ -2081,7 +2089,7 @@ ${result.blueprintJson}
           {(result.buildMd || result.outputMode === 'blueprinter') && (
             <VibePromptPanel
               buildMd={result.buildMd}
-              blueprintJson={result.blueprintJson}
+              blueprintJson={effectiveBlueprintJson}
               provenance={result.provenance}
               buildTarget={result.buildTarget}
               vibeTarget={vibeTarget}
