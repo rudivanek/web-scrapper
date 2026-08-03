@@ -1442,8 +1442,16 @@ export function DesignExtractor() {
             <p className="text-sm font-medium text-gray-700">Imágenes</p>
             {!shows.imageSourceRadio || (!isDualUrl && !fillUnsplash) ? (
               <p className="text-xs text-gray-500">
-                Se toman de {url.trim() ? hostname(url) : 'la URL de arriba'}. Añade una URL de texto/copy
-                si quieres elegir entre dos sitios.
+                {imageSource === 'unsplash'
+                  ? 'Se usan imágenes genéricas de Unsplash.'
+                  : `Se toman de ${
+                      imageSource === 'copy' && isDualUrl
+                        ? hostname(structureUrl)
+                        : url.trim()
+                          ? hostname(url)
+                          : 'la URL de arriba'
+                    }.`}
+                {!isDualUrl && imageSource !== 'unsplash' && ' Añade una URL de texto/copy si quieres elegir entre dos sitios.'}
               </p>
             ) : (
             <div className="space-y-2">

@@ -97,7 +97,10 @@ export function buildConfigReport(input: ConfigReportInput): string {
     fabricationCount, editedByHand,
   } = input;
 
-  const dual = copyUrl.trim() !== '';
+  // Non-empty is not enough — the same URL in both fields is a single-source run.
+  // Matches the isDualUrl test in DesignExtractor so the report cannot contradict the UI.
+  const normalize = (u: string) => u.trim().toLowerCase().replace(/\/+$/, '');
+  const dual = copyUrl.trim() !== '' && normalize(copyUrl) !== normalize(designUrl);
   const contentUrl = dual ? copyUrl : designUrl;
   const sectionCount = countSections(blueprintJson);
   const mode = readMode(blueprintJson);
