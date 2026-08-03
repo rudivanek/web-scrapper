@@ -532,7 +532,7 @@ export function DesignExtractor() {
   // ── Presets ───────────────────────────────────────────────────────────────
   // Named jobs rather than a wall of switches. A preset both sets the options and
   // hides the ones it does not need; 'manual' shows the full form unchanged.
-  type Preset = 'clone' | 'restyle' | 'describe' | 'manual';
+  type Preset = 'clone' | 'restyle' | 'describe' | 'content' | 'manual';
   const [preset, setPreset] = useState<Preset | null>(null);
   const [restyleSource, setRestyleSource] = useState<'url' | 'file'>('url');
 
@@ -540,8 +540,16 @@ export function DesignExtractor() {
     setPreset(next);
     // 'describe' starts the editor in free mode. Written straight into the blueprint
     // envelope, which is the same place the editor's own toggle writes to.
-    if (next === 'describe' && !manualBlueprint.trim()) {
-      setManualBlueprint(JSON.stringify({ blueprint_mode: 'free', sections: [] }, null, 2));
+    if ((next === 'describe' || next === 'content') && !manualBlueprint.trim()) {
+      // 'content' also pre-ticks the copy flag: the user's text IS the page copy,
+      // so copy.md should not compete with it in the prompt.
+      setManualBlueprint(JSON.stringify(
+        next === 'content'
+          ? { blueprint_mode: 'free', free_form_is_copy: true, sections: [] }
+          : { blueprint_mode: 'free', sections: [] },
+        null,
+        2,
+      ));
     }
     // Reset to this preset's baseline so a leftover setting from a previous run
     // cannot silently change what a named job does.
@@ -563,6 +571,17 @@ export function DesignExtractor() {
       setImageSource('design');
       // Free mode replaces the section list, so generating one would be waste.
       setGenerateBlueprint(false);
+    } else if (next === 'content') {
+      setStructureUrl('');
+      setDesignSource('extract');
+      // Left on 'scrape' deliberately. With free_form_is_copy set, copy.md is dropped
+      // from the prompt entirely, so Lorem would buy nothing — and if the user unticks
+      // the flag in the editor, real scraped copy is what they want back.
+      setCopyMode('scrape');
+      // The user's sections do not exist on the design site, so its photos would be
+      // wired into sections they have nothing to do with.
+      setImageSource('unsplash');
+      setGenerateBlueprint(false);
     }
   };
 
@@ -576,6 +595,7 @@ export function DesignExtractor() {
     clone: 'Clonar un sitio',
     restyle: 'Cambiar el diseño',
     describe: 'Describirlo yo',
+    content: 'Traer mi propio contenido',
     manual: 'Configurar a mano',
   };
   const isManual = preset === 'manual';
@@ -1215,6 +1235,7 @@ export function DesignExtractor() {
             { id: 'clone' as const, title: 'Clonar un sitio', desc: 'Reconstruir un sitio tal como está. Todo sale de una sola URL.' },
             { id: 'restyle' as const, title: 'Cambiar el diseño', desc: 'El contenido del cliente, con el aspecto de otro sitio o de un design.md tuyo.' },
             { id: 'describe' as const, title: 'Describirlo yo', desc: 'Tú escribes cómo debe ser la página. El diseño sale de una URL.' },
+            { id: 'content' as const, title: 'Traer mi propio contenido', desc: 'Ya tienes la estructura y el texto escritos. Solo el diseño sale de una URL.' },
             { id: 'manual' as const, title: 'Configurar a mano', desc: 'Todas las opciones visibles, sin nada preseleccionado.' },
           ]).map(opt => (
             <button
@@ -1254,10 +1275,7 @@ export function DesignExtractor() {
         {outputMode === 'blueprinter' && preset !== null && (
           <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
             <p className="text-sm text-gray-700">
-              {preset === 'clone' && 'Clonar un sitio'}
-              {preset === 'restyle' && 'Cambiar el diseño'}
-              {preset === 'describe' && 'Describirlo yo'}
-              {preset === 'manual' && 'Configurar a mano'}
+              {preset && PRESET_LABELS[preset]}
             </p>
             <button
               onClick={() => setPreset(null)}

@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.27 | Last Updated: 2026-08-03T00:00:00Z -->
+<!-- Version: 8.28 | Last Updated: 2026-08-03T00:00:00Z -->
 
 ---
 
@@ -2880,3 +2880,56 @@ The `isFreeMode ? '' : blueprintInstructions(blueprintJson)` line was replaced w
 - With the checkbox OFF: the generated prompt is byte-identical to the previous output.
 - With the checkbox ON: `## copy.md` is absent from the prompt, item 3 points at "Page structure", and no Lorem warning appears even with Lorem Ipsum enabled.
 - In free mode WITH layout instructions typed: the "Requested layout changes" section now appears (it previously did not).
+
+---
+
+## Fifth Preset — "Traer mi propio contenido" (Step 30)
+
+**Added:** 2026-08-03
+
+There was no preset for the case where the user supplies both the structure and the finished copy, and only the design system comes from a scrape. Doing it today meant "Configurar a mano" plus eight correct settings, and getting one wrong silently degraded the output.
+
+### What the new preset is for
+
+The user has written the page — sections, headlines, body copy, CTAs — and wants it built with another site's design system. Scraped copy and scraped images both fight that, because the described sections do not exist on the scraped site.
+
+### What the preset does
+
+- **Structure URL:** cleared (same as "Describirlo yo")
+- **Design source:** extract from a URL (same as "Describirlo yo")
+- **Blueprint mode:** Libre (free-form), with `free_form_is_copy` pre-ticked — the "Este texto es el copy final" checkbox from Step 29b starts checked, so `copy.md` is dropped from the prompt entirely and the free-form text is declared the final copy
+- **Copy mode:** left on 'scrape' deliberately. With `free_form_is_copy` set, `copy.md` is dropped from the prompt entirely, so Lorem would buy nothing — and if the user unticks the flag in the editor, real scraped copy is what they want back
+- **Image source:** Unsplash (not 'design'). The user's sections do not exist on the design site, so its photos would be wired into sections they have nothing to do with
+- **Section-list generation:** off (free mode replaces the section list)
+
+### "Describirlo yo" is unchanged
+
+The existing "Describirlo yo" preset keeps its current behaviour exactly: copy mode 'scrape', image source 'design', no copy flag. Do not modify it.
+
+### Blueprint seeding guard
+
+The `!manualBlueprint.trim()` guard is load-bearing — it stops a blueprint the user has already worked on from being overwritten. If a blueprint already has content when the user picks "Traer mi propio contenido", the existing blueprint is preserved.
+
+### Config.md reload support
+
+The `configReport.ts` parser's preset allow-list now includes `'content'`, so a config.md saved from the new preset uploads correctly and comes back as "Traer mi propio contenido" instead of being silently dropped.
+
+### Active-preset label deduplication
+
+The hardcoded four-label block in the preset chooser was replaced with `{preset && PRESET_LABELS[preset]}`, so a future preset only has to be named once (in `PRESET_LABELS`).
+
+### Files Changed (exactly two)
+
+| File | Change |
+|---|---|
+| `src/components/DesignExtractor.tsx` | Added `'content'` to the `Preset` type and `PRESET_LABELS`; seed the blueprint envelope with `free_form_is_copy: true` for the new preset; added the `content` preset branch (Unsplash images, copy mode 'scrape', no blueprint generation); added the card in the chooser; replaced the hardcoded active-preset label block with `PRESET_LABELS[preset]` |
+| `src/lib/configReport.ts` | Added `'content'` to the preset type and `PRESETS` allow-list so config.md reload preserves the preset |
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in either modified file.
+- `npm run build`: succeeded, exit 0.
+- "Describirlo yo" behaves exactly as before — same copy mode, same image source, no copy flag.
+- Picking "Traer mi propio contenido" on a fresh load: section editor opens in Libre with "Este texto es el copy final" already ticked, image source is Unsplash, section-list generation is off.
+- Picking it when a blueprint already has content: the existing blueprint is NOT overwritten.
+- Save a config.md from the new preset and re-upload it: the preset comes back as "Traer mi propio contenido", not dropped.

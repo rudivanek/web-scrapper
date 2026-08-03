@@ -8,7 +8,7 @@
 export interface ReusableSettings {
   url: string;
   structureUrl: string;
-  preset: 'clone' | 'restyle' | 'describe' | 'manual' | null;
+  preset: 'clone' | 'restyle' | 'describe' | 'content' | 'manual' | null;
   restyleSource: 'url' | 'file';
   designSource: 'extract' | 'own';
   copyMode: 'scrape' | 'lorem';
@@ -196,7 +196,7 @@ export function buildConfigReport(input: ConfigReportInput): string {
   return lines.join('\n');
 }
 
-const PRESETS = ['clone', 'restyle', 'describe', 'manual'] as const;
+const PRESETS = ['clone', 'restyle', 'describe', 'content', 'manual'] as const;
 const RESTYLE_SOURCES = ['url', 'file'] as const;
 const DESIGN_SOURCES = ['extract', 'own'] as const;
 const COPY_MODES = ['scrape', 'lorem'] as const;
