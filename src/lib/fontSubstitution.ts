@@ -126,6 +126,11 @@ export function extractFamiliesFromDesignMd(designMd: string): string[] {
     if (!name) return;
     const key = name.toLowerCase();
     if (key === 'not found' || key.startsWith('not found')) return;
+    // CSS function values are indirection, not font names. Token-based sites (Elementor
+    // especially) declare font-family: var(--e-global-typography-...), which is not a
+    // family and must never be reported as an unknown font.
+    if (/(?:^|\s)(?:var|theme|calc|env|attr|clamp)\s*\(/.test(key)) return;
+    if (key.startsWith('--')) return;
     if (seen.has(key)) return;
     seen.add(key);
     out.push(name);
@@ -154,6 +159,20 @@ export function extractFamiliesFromDesignMd(designMd: string): string[] {
   return out;
 }
 
+/**
+ * Foundries ship weights as separate families ('Gilroy Bold'). Strip a trailing
+ * weight or style word so the base family can be looked up. Deliberately does NOT
+ * strip width words like Condensed — Barlow Condensed is its own Google family.
+ */
+const WEIGHT_WORDS = /\s+(thin|extra ?light|ultra ?light|light|regular|book|normal|text|medium|semi ?bold|demi ?bold|bold|extra ?bold|ultra ?bold|black|heavy|italic|oblique)$/;
+
+function stripWeightSuffix(name: string): string {
+  let out = name;
+  // Twice, so 'Gilroy Bold Italic' reduces to 'Gilroy'.
+  for (let i = 0; i < 2; i++) out = out.replace(WEIGHT_WORDS, '').trim();
+  return out;
+}
+
 /** Classify each detected family. */
 export function analyzeFonts(designMd: string): FontAnalysis {
   const families = extractFamiliesFromDesignMd(designMd);
@@ -165,6 +184,8 @@ export function analyzeFonts(designMd: string): FontAnalysis {
       findings.push({ original, status: 'system' });
       continue;
     }
+    // Full name first, so real families whose name ends in a weight word — Archivo Black,
+    // Alfa Slab One — are matched before any stripping happens.
     if (GOOGLE_FONTS.has(key)) {
       findings.push({ original, status: 'google' });
       continue;
@@ -173,6 +194,19 @@ export function analyzeFonts(designMd: string): FontAnalysis {
     if (sub) {
       findings.push({ original, status: 'substituted', substitute: sub.to, why: sub.why });
       continue;
+    }
+    // Retry without a trailing weight/style word: 'Gilroy Bold' should find the Gilroy rule.
+    const base = stripWeightSuffix(key);
+    if (base !== key) {
+      if (GOOGLE_FONTS.has(base)) {
+        findings.push({ original, status: 'google' });
+        continue;
+      }
+      const baseSub = SUBSTITUTIONS[base];
+      if (baseSub) {
+        findings.push({ original, status: 'substituted', substitute: baseSub.to, why: baseSub.why });
+        continue;
+      }
     }
     findings.push({ original, status: 'unknown' });
   }
