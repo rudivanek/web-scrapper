@@ -173,10 +173,55 @@ function buildUnsplashUrl(query: string): string {
   return `https://source.unsplash.com/1600x900/?${encoded}`;
 }
 
+/**
+ * Pull section names out of the user's free-form structure text.
+ *
+ * Numbered headings ("1. Hero", "4. Diagnóstico Gratuito") are the reliable signal and
+ * are preferred. Falls back to short standalone lines that introduce a paragraph, which
+ * covers unnumbered documents at the cost of the occasional miss.
+ */
+export function extractFreeFormSectionNames(freeForm: string): string[] {
+  const lines = freeForm.split('\n').map(l => l.trim());
+
+  const numbered: string[] = [];
+  for (const line of lines) {
+    const m = line.match(/^(\d{1,2})\s*[.)]\s*(.+)$/);
+    if (m) {
+      const name = m[2].replace(/[:\-–—]\s*$/, '').trim();
+      if (name && name.length <= 60) numbered.push(name);
+    }
+  }
+  // Three is enough to trust the numbering rather than the looser fallback.
+  if (numbered.length >= 3) return dedupeNames(numbered);
+
+  const bare: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.length > 50) continue;
+    if (/[.,;:!?]$/.test(line)) continue;
+    if (/^[#>*\-[]/.test(line)) continue;
+    if (line.split(/\s+/).length > 6) continue;
+    const next = lines[i + 1] ?? '';
+    if (next.length > 60) bare.push(line);
+  }
+  return dedupeNames(bare);
+}
+
+function dedupeNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of names) {
+    const k = n.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); out.push(n); }
+  }
+  return out;
+}
+
 export function buildImageMarkdown(
   source: ImageSourceInput | null,
   imageSource: ImageSourceMode,
   fillUnsplash: boolean,
+  freeFormSectionNames: string[] = [],
 ): string {
   const allEntries: ImageEntry[] = [];
   let allSectionNames: string[] = [];
@@ -184,8 +229,14 @@ export function buildImageMarkdown(
   if (source && imageSource !== 'unsplash') {
     allEntries.push(...extractImagesFromSource(source));
     allSectionNames = collectAllSectionNames(source.rawHtml);
-  } else if (source && imageSource === 'unsplash') {
-    allSectionNames = collectAllSectionNames(source.rawHtml);
+  } else if (imageSource === 'unsplash') {
+    // The user's own structure wins. The scraped site's sections describe a different
+    // page entirely, so they would key placeholders to sections that do not exist here.
+    allSectionNames = freeFormSectionNames.length > 0
+      ? [...freeFormSectionNames]
+      : source
+        ? collectAllSectionNames(source.rawHtml)
+        : [];
   }
 
   const sectionOrder: string[] = [];

@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.29 | Last Updated: 2026-08-03T00:00:00Z -->
+<!-- Version: 8.30 | Last Updated: 2026-08-03T00:00:00Z -->
 
 ---
 
@@ -2975,3 +2975,53 @@ When a blueprint WAS generated, `result.blueprintJson` is non-empty and wins —
 - "Traer mi propio contenido" with text pasted into Libre: the generated prompt now contains a `## Page structure (authoritative)` section with that text, and does NOT contain a `## copy.md` section.
 - "Clonar un sitio": the prompt contains the generated section list exactly as before.
 - The prompt shown on screen and the downloaded `PASTE_PROMPT_*.md` are identical in both cases.
+
+---
+
+## Unsplash placeholders from the user's own structure (Step 32)
+
+**Added:** 2026-08-03
+
+Selecting Unsplash as the image source was producing an `images.md` with NO images at all — just a header and a note. Both the "Traer mi propio contenido" preset and manual Unsplash selection were affected.
+
+### Two causes
+
+1. **`DesignExtractor.tsx`** — when `imageSource === 'unsplash'`, none of the three `imageInput` branches matched, so `imageInput` stayed `null`.
+2. **`imageExporter.ts`** — the Unsplash filler built its list from `collectAllSectionNames(source.rawHtml)`, i.e. the SCRAPED site's sections. Even with a non-null source that was wrong: the user wrote their own page, and the scraped site's sections have nothing to do with it.
+
+### The fix
+
+When the user has supplied a free-form structure, the section names are now taken from THAT and one Unsplash placeholder is generated per section.
+
+#### `src/lib/imageExporter.ts`
+
+- **New exported function `extractFreeFormSectionNames(freeForm: string): string[]`** — pulls section names out of the user's free-form structure text. Numbered headings ("1. Hero", "4. Diagnóstico Gratuito") are the reliable signal and are preferred (needs at least 3 numbered lines to trust the numbering). Falls back to short standalone lines that introduce a paragraph, which covers unnumbered documents at the cost of the occasional miss. Results are deduplicated.
+- **New parameter on `buildImageMarkdown`** — `freeFormSectionNames: string[] = []` added as the last parameter with a default so existing calls keep working.
+- **Unsplash branch rewrite** — when `imageSource === 'unsplash'`, the user's own structure wins: if `freeFormSectionNames` is non-empty, those names are used; otherwise it falls back to the scraped site's sections (or an empty list if no source). The existing filler loop already had `useUnsplash` true for this mode, so it now generates one entry per name.
+
+#### `src/components/DesignExtractor.tsx`
+
+- **Import** — `extractFreeFormSectionNames` added to the existing import from `../lib/imageExporter`.
+- **Free-form extraction before `buildImageMarkdown` call** — parses `manualBlueprint` (not `result.blueprintJson`, which doesn't exist yet at that point in the extraction) as a blueprint envelope; if `blueprint_mode === 'free'` and `free_form` is a string, extracts section names from it. Wrapped in try/catch so a non-JSON blueprint falls through with an empty list.
+- **Pass to `buildImageMarkdown`** — `freeFormSectionNames` passed as the new fourth argument.
+
+### Why this is safe
+
+- When a blueprint WAS generated (Clone, Restyle), `imageSource` is typically 'design' or 'copy', not 'unsplash' — the Unsplash branch is not reached, so behaviour is unchanged.
+- When the user picks Unsplash manually with NO free-form text, `freeFormSectionNames` is empty, so it falls back to the scraped site's sections (or empty list) — same as today.
+- The fallback only changes behaviour when the user has written their own structure AND selected Unsplash, which is exactly when the scraped site's sections are wrong.
+
+### Files Changed (exactly two)
+
+| File | Change |
+|---|---|
+| `src/lib/imageExporter.ts` | Added `extractFreeFormSectionNames` and `dedupeNames` functions; added `freeFormSectionNames` parameter to `buildImageMarkdown`; rewrote the Unsplash branch to prefer user's own section names |
+| `src/components/DesignExtractor.tsx` | Added import; extract free-form section names from `manualBlueprint` before calling `buildImageMarkdown`; pass as fourth argument |
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in either modified file.
+- `npm run build`: succeeded, exit 0.
+- "Traer mi propio contenido" with a numbered document pasted into Libre: `images.md` lists one Unsplash URL per section, each tagged `[UNSPLASH — relleno genérico, reemplazar]`.
+- "Clonar un sitio": `images.md` contains the site's real images exactly as before.
+- Manual with image source Unsplash and NO free-form text: behaviour unchanged from today.

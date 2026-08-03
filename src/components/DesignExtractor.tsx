@@ -16,7 +16,7 @@ import { buildVibePrompt, buildBlueprinterPrompt, VIBE_TARGETS, type VibeTarget,
 
 type BuilderFormat = 'html' | 'react';
 import { buildCopyMarkdown, buildCopyMarkdownLorem } from '../lib/copyExporter';
-import { buildImageMarkdown, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
+import { buildImageMarkdown, extractFreeFormSectionNames, type ImageSourceInput, type ImageSourceMode } from '../lib/imageExporter';
 import { SectionEditorPanel } from './section-editor/SectionEditorPanel';
 import { BlueprintMakerHelpModal } from './BlueprintMakerHelpModal';
 import { buildConfigReport, parseConfigSettings } from '../lib/configReport';
@@ -901,7 +901,23 @@ export function DesignExtractor() {
         } else if (imageSource === 'copy' && !dual) {
           imageInput = { rawHtml: designRawHtml, pageUrl: designUrl };
         }
-        imagesMd = buildImageMarkdown(imageInput, imageSource, fillUnsplash);
+
+        // When the user wrote the page themselves, placeholders must be keyed to THEIR
+        // sections, not the scraped site's.
+        let freeFormSectionNames: string[] = [];
+        try {
+          const bp = JSON.parse(manualBlueprint || '{}') as {
+            blueprint_mode?: string;
+            free_form?: string;
+          };
+          if (bp.blueprint_mode === 'free' && typeof bp.free_form === 'string') {
+            freeFormSectionNames = extractFreeFormSectionNames(bp.free_form);
+          }
+        } catch {
+          // No usable blueprint envelope — fall through with an empty list.
+        }
+
+        imagesMd = buildImageMarkdown(imageInput, imageSource, fillUnsplash, freeFormSectionNames);
       }
 
       // Phase 6: LLM Call C — BUILD.md (only for React/Tailwind target, skipped in Blueprinter mode)
