@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.26 | Last Updated: 2026-08-03T00:00:00Z -->
+<!-- Version: 8.27 | Last Updated: 2026-08-03T00:00:00Z -->
 
 ---
 
@@ -2825,3 +2825,58 @@ In the Restyle preset with two URLs, `imageSource` is `'copy'` and images are co
 
 - `npm run typecheck`: 14 errors, all pre-existing. Zero new errors. Zero errors in either modified file.
 - `npm run build`: succeeded, exit 0.
+
+---
+
+## Libre Mode — "Este texto es el copy final" Checkbox and Layout Instructions Fix (Step 29b)
+
+**Added:** 2026-08-03
+
+Two problems with Libre (free) mode that caused the builder to receive contradictory or incomplete instructions.
+
+### Problem 1 — Two competing sets of copy
+
+When the user pasted finished copy into the free-form box, the prompt still included `copy.md` scraped from the site, labelled real and verbatim. The free-form text was declared authoritative over the *screenshot* only — never over `copy.md`. The builder received two complete sets of copy for the same page with no rule for which wins, and produced a mix.
+
+### Problem 2 — Layout instructions silently discarded
+
+In free mode, the user's typed layout instructions were dropped from the prompt entirely (`const instructions = isFreeMode ? '' : ...`). The user's typed guidance vanished with no warning.
+
+### Fix 1 — New "Este texto es el copy final" checkbox
+
+A new checkbox appears directly below the free-form textarea in the Section Editor panel. When checked, it sets a `free_form_is_copy` flag in the blueprint envelope.
+
+**What changes in the prompt when the checkbox is ON:**
+- Item 3 (COPY) points at "Page structure" instead of `copy.md`, instructing the builder to use the free-form text verbatim as the final copy.
+- The entire `## copy.md` section is removed from the prompt — no competing copy.
+- The assembly line says "place the copy from 'Page structure'" instead of "place copy.md's text".
+- The Lorem Ipsum warning is suppressed, since `copy.md` is not in the prompt and the warning would describe something the builder cannot see.
+
+**What changes when the checkbox is OFF:**
+- Nothing. The prompt is byte-identical to the previous output. This was verified explicitly.
+
+### Fix 2 — Layout instructions now included in free mode
+
+The `isFreeMode ? '' : blueprintInstructions(blueprintJson)` line was replaced with a plain `blueprintInstructions(blueprintJson)` call. Layout instructions now appear in the prompt in both modes, under the "Requested layout changes" section.
+
+### Files Changed (exactly three)
+
+| File | Change |
+|---|---|
+| `src/hooks/useBlueprintSections.ts` | Added `freeFormIsCopy` flag and `setFreeFormIsCopy` setter; both added to the returned object |
+| `src/components/section-editor/SectionEditorPanel.tsx` | Added the checkbox UI below the free-form textarea; destructured `freeFormIsCopy` and `setFreeFormIsCopy` from the hook |
+| `src/lib/vibePrompt.ts` | Added `blueprintFreeFormIsCopy` reader; compute `freeIsCopy`, `copyLine`, `copySection`, `assemblyLine`; suppress Lorem warning when `freeIsCopy`; include layout instructions in both modes; wire variables into the template |
+
+### Design Decisions
+
+- Writing `undefined` when the checkbox is unchecked (not `false`) keeps the flag out of the JSON entirely rather than leaving `false` behind.
+- `freeIsCopy` is declared before `loremWarning` to avoid a use-before-declaration.
+- The IMPORTANT screenshot paragraph mentioning `copy.md` is left alone — it describes what a screenshot adds, not what copy source to use, and is harmless in both modes.
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in any of the three modified files.
+- `npm run build`: succeeded, exit 0.
+- With the checkbox OFF: the generated prompt is byte-identical to the previous output.
+- With the checkbox ON: `## copy.md` is absent from the prompt, item 3 points at "Page structure", and no Lorem warning appears even with Lorem Ipsum enabled.
+- In free mode WITH layout instructions typed: the "Requested layout changes" section now appears (it previously did not).

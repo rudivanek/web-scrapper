@@ -116,6 +116,13 @@ export function useBlueprintSections(
     writeEnvelope({ free_form: text });
   }, [writeEnvelope]);
 
+  /** True when the free-form text is the final copy, not just a structure description. */
+  const freeFormIsCopy = envelope.free_form_is_copy === true;
+
+  const setFreeFormIsCopy = useCallback((next: boolean) => {
+    writeEnvelope({ free_form_is_copy: next ? true : undefined });
+  }, [writeEnvelope]);
+
   /** Plain-text outline of the current sections, as a starting draft for free mode. */
   const outlineFromSections = useCallback((): string => {
     if (sections.length === 0) return '';
@@ -143,6 +150,8 @@ export function useBlueprintSections(
     setMode,
     freeForm,
     setFreeForm,
+    freeFormIsCopy,
+    setFreeFormIsCopy,
     outlineFromSections,
     parseError,
     dirty,

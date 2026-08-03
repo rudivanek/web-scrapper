@@ -30,7 +30,7 @@ export function SectionEditorPanel({
 
   const {
     sections, parseError, dirty, instructions, setInstructions,
-    mode, setMode, freeForm, setFreeForm, outlineFromSections,
+    mode, setMode, freeForm, setFreeForm, freeFormIsCopy, setFreeFormIsCopy, outlineFromSections,
     addSection, updateSection, deleteSection, moveSection, duplicateSection, toJson,
   } = useBlueprintSections(blueprintJson, onChange);
 
@@ -248,6 +248,21 @@ export function SectionEditorPanel({
                 className="w-full border-0 px-3.5 py-2.5 text-xs text-gray-900 placeholder-gray-400 focus:outline-none resize-y"
                 placeholder={'Ejemplo:\n\n1. Hero a pantalla completa, imagen de fondo oscura, titular centrado y un CTA.\n2. Tres columnas de servicios con icono, título y descripción.\n3. Testimonios en carrusel.\n4. CTA final a ancho completo.'}
               />
+              <div className="px-3.5 py-2.5 bg-gray-50 border-t border-gray-200">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={freeFormIsCopy}
+                    onChange={e => setFreeFormIsCopy(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-[11px] text-gray-600 leading-relaxed">
+                    <span className="font-medium text-gray-700">Este texto es el copy final.</span>{' '}
+                    Marca esto si pegaste el texto real de la página, no solo una descripción de la
+                    estructura. El prompt usará este texto como copy y dejará de enviar copy.md.
+                  </span>
+                </label>
+              </div>
               {!freeForm.trim() && (
                 <p className="px-3.5 pb-2.5 text-[11px] text-amber-700">
                   Vacío: el prompt no llevará estructura. Escribe algo o vuelve a Estructurado.

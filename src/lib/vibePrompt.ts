@@ -524,6 +524,17 @@ function blueprintFreeForm(blueprintJson?: string): string {
   }
 }
 
+/** True when the user marked the free-form text as the final copy for the page. */
+function blueprintFreeFormIsCopy(blueprintJson?: string): boolean {
+  if (!blueprintJson || !blueprintJson.trim()) return false;
+  try {
+    const bp = JSON.parse(blueprintJson) as { free_form_is_copy?: unknown };
+    return bp?.free_form_is_copy === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Free-text layout instructions the user typed in the section editor, if any. */
 function blueprintInstructions(blueprintJson?: string): string {
   if (!blueprintJson || !blueprintJson.trim()) return '';
@@ -600,10 +611,26 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
   const freeSection = isFreeMode
     ? `\n\n---\n\n## Page structure (authoritative)\n\n${freeForm}`
     : '';
+
+  const freeIsCopy = isFreeMode && blueprintFreeFormIsCopy(blueprintJson);
+
+  const copyLine = freeIsCopy
+    ? `3. COPY — from "Page structure" below. That text IS the final copy for this page. Use it verbatim: every headline, paragraph, list item, quote, and CTA label exactly as written. Do not rewrite, translate, shorten, or improve it. Where it names an element without giving text (a logo, a photo, a chart), leave a clear placeholder.`
+    : `3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.`;
+
+  const copySection = freeIsCopy
+    ? ''
+    : `\n\n---\n\n## copy.md\n\n\`\`\`markdown\n${copyMd}\n\`\`\``;
+
+  const assemblyLine = freeIsCopy
+    ? `Build the layout from the screenshot first, then apply design.md's styling, then place the copy from "Page structure", then insert images.md's URLs into their matching sections.`
+    : `Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.`;
   // In dual-URL mode the design comes from one site and the structure/copy from another.
   // Screenshotting the design site yields that site's layout wearing this site's words —
   // the cross-site mix that does not work. Name the right page explicitly.
-  const instructions = isFreeMode ? '' : blueprintInstructions(blueprintJson);
+  // Layout instructions apply in both modes. They used to be dropped in free mode,
+  // which silently discarded whatever the user typed.
+  const instructions = blueprintInstructions(blueprintJson);
   const hasInstructions = instructions !== '';
   const instructionsInput = hasInstructions
     ? `\n6. LAYOUT CHANGES — from "Requested layout changes" below. These are deliberate changes the user wants to the structure. They OVERRIDE the section list and the screenshot wherever they conflict. Apply them; do not treat them as suggestions.`
@@ -629,7 +656,10 @@ export function buildBlueprinterPrompt(target: VibeTarget, designMd: string, cop
     ? `\n\n---\n\n## images.md\n\n\`\`\`markdown\n${imagesMd}\n\`\`\``
     : '';
 
-  const loremWarning = isLorem
+  // When the free-form text is the copy, copy.md is not in the prompt at all, so a
+  // Lorem warning would be describing something the builder cannot see — and would
+  // contradict the real copy sitting in "Page structure".
+  const loremWarning = isLorem && !freeIsCopy
     ? '\n\nIMPORTANT: The copy is Lorem Ipsum placeholder — use it to render the layout, but it is NOT real content. Do not treat it as meaningful text.'
     : '';
 
@@ -643,10 +673,10 @@ Build a web page from ${inputCount} inputs, each with one job:
 
 1. STRUCTURE & LAYOUT — from the screenshot I will attach. Recreate its section layout, order, and composition.
 2. DESIGN SYSTEM — from design.md below. Apply these exact colors, fonts, sizes, spacing, and component styles. Use the screenshot only for LAYOUT; take all styling values from design.md.
-3. COPY — from copy.md below. Use this text verbatim, placed into the matching sections. Do not rewrite, translate, or invent text. Leave a clear placeholder for any gap rather than inventing copy.
+${copyLine}
 4. IMAGES — from images.md below. Use these real image URLs in their matching sections. Entries marked [UNSPLASH] are generic filler — use them only where no real image exists, and treat them as replaceable placeholders. Never invent or hotlink images not listed here.${blueprintInput}${freeInput}${instructionsInput}
 
-Build the layout from the screenshot first, then apply design.md's styling, then place copy.md's text, then insert images.md's URLs into their matching sections.
+${assemblyLine}
 
 IMPORTANT: You must attach your own inspiration screenshot to the builder. This app does not supply a screenshot in Blueprinter mode — the screenshot provides the layout and visual composition that design.md, copy.md, and images.md cannot convey.${screenshotTarget}${loremWarning}${formatNote}
 
@@ -660,15 +690,7 @@ ${designMd}
 
 ---
 
-${fontDirective}
-
----
-
-## copy.md
-
-\`\`\`markdown
-${copyMd}
-\`\`\`${imagesSection}${blueprintSection}${freeSection}${instructionsSection}`;
+${fontDirective}${copySection}${imagesSection}${blueprintSection}${freeSection}${instructionsSection}`;
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
