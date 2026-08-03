@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.25 | Last Updated: 2026-08-01T00:00:00Z -->
+<!-- Version: 8.26 | Last Updated: 2026-08-03T00:00:00Z -->
 
 ---
 
@@ -2781,4 +2781,47 @@ Settings you might remember; whether design.md came back complete, or whether th
 ### Typecheck / Build
 
 - `npm run typecheck`: 17 errors, all pre-existing. Zero new errors.
+- `npm run build`: succeeded, exit 0.
+
+---
+
+## DesignExtractor — Imágenes Label and config.md Dual-URL Test Fixes (Step 29a)
+
+**Added:** 2026-08-03
+
+Two labelling bugs. Neither changes what the app extracts — the extraction logic is correct in both cases. Only the text shown to the user was wrong, which quietly contradicted what the app was really doing.
+
+### Bug 1 — The Imágenes box named the wrong site
+
+In the Restyle preset with two URLs, `imageSource` is `'copy'` and images are correctly taken from the copy/structure URL. But the label was hardcoded to the design URL and always told the user to add a copy URL, even when one was already filled in.
+
+**Fix in `src/components/DesignExtractor.tsx`:** the static sentence was replaced with a dynamic one that names the site images are actually taken from (`hostname(structureUrl)` when `imageSource === 'copy' && isDualUrl`, otherwise `hostname(url)`), and the "Añade una URL de texto/copy" advice only appears when there is no second URL yet. An Unsplash branch was added so the box reads "Se usan imágenes genéricas de Unsplash." when `imageSource === 'unsplash'`.
+
+### Bug 2 — config.md treated same-URL runs as dual-URL
+
+`buildConfigReport` decided a run was dual-URL when the copy URL was merely non-empty. Entering the same URL in both fields produced a self-contradicting note: "Captura de pantalla: adjuntar la de https://springsummer.dk/ — no la de https://springsummer.dk/." The UI already tested this correctly with normalised comparison.
+
+**Fix in `src/lib/configReport.ts`:** the `dual` test now normalises both URLs (trim, lowercase, strip trailing slashes) and requires them to differ after normalisation — matching the `isDualUrl` test in `DesignExtractor`. `contentUrl` on the next line already derives from `dual`, so the screenshot note corrects itself.
+
+### What Did NOT Change
+
+- `applyPreset`, the `imageSource` state, the `shows` map, and the image extraction branch at the `imageInput` assignment — the behaviour was correct; only the copy was wrong.
+- `contentUrl` derivation in `configReport.ts` — it already derives from `dual` and corrects itself.
+
+### Verification
+
+- Restyle preset with design URL `https://augen.pro/` and copy URL `https://sharpen.studio`: the Imágenes box reads "Se toman de sharpen.studio." with no "Añade una URL" sentence.
+- Clone run with one URL: the box reads "Se toman de {ese sitio}. Añade una URL de texto/copy si quieres elegir entre dos sitios."
+- Same URL in both fields: config.md ends the screenshot note with a plain period and no "— no la de ..." clause.
+
+### Files Changed (exactly two)
+
+| File | Change |
+|---|---|
+| `src/components/DesignExtractor.tsx` | Imágenes label made dynamic — names the actual image source site; "Añade una URL" advice gated on `!isDualUrl`; Unsplash branch added |
+| `src/lib/configReport.ts` | `dual` test normalises both URLs and requires them to differ — matches `isDualUrl` in DesignExtractor |
+
+### Typecheck / Build
+
+- `npm run typecheck`: 14 errors, all pre-existing. Zero new errors. Zero errors in either modified file.
 - `npm run build`: succeeded, exit 0.
