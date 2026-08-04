@@ -168,9 +168,17 @@ function extractImagesFromSource(source: ImageSourceInput): ImageEntry[] {
   return entries;
 }
 
-function buildUnsplashUrl(query: string): string {
-  const encoded = encodeURIComponent(query.toLowerCase().replace(/\s+/g, '-'));
-  return `https://source.unsplash.com/1600x900/?${encoded}`;
+/**
+ * Build a placeholder image URL for a section that has no real image.
+ *
+ * Uses a static placeholder service rather than the discontinued Unsplash source URLs,
+ * which resolve to nothing and leave the builder emitting <img> tags that never load. A labelled grey box is more useful than a broken image: it
+ * renders, it holds the layout open, and it names the section it belongs to so the
+ * replacement is obvious.
+ */
+function buildPlaceholderUrl(section: string): string {
+  const label = encodeURIComponent(section.replace(/[()]/g, '').trim().slice(0, 40));
+  return `https://placehold.co/1600x900/e8e8e8/8a8a8a?text=${label}`;
 }
 
 /**
@@ -260,7 +268,7 @@ export function buildImageMarkdown(
     for (const sec of allSectionNames) {
       if (!sectionsWithImages.has(sec) && !SKIP_SECTIONS_FOR_FILLER.has(sec)) {
         allEntries.push({
-          url: buildUnsplashUrl(sec), alt: '', width: null, height: null,
+          url: buildPlaceholderUrl(sec), alt: `Placeholder — ${sec}`, width: 1600, height: 900,
           section: sec, isUnsplash: true,
         });
       }
@@ -275,7 +283,7 @@ export function buildImageMarkdown(
 
   let header: string;
   if (imageSource === 'unsplash') {
-    header = `# Imágenes de: Unsplash (genéricas)\nTodas las imágenes son de relleno genérico de Unsplash. Reemplázalas con imágenes reales antes de publicar.`;
+    header = `# Imágenes: placeholders genéricos\nNinguna imagen es real. Cada una es un recuadro gris etiquetado con el nombre de su sección.\nReemplázalas todas antes de publicar.\n\nSi una sección tiene varias tarjetas (proyectos, testimonios), reutiliza el mismo placeholder en todas — se reemplazan una por una después.`;
   } else if (source) {
     header = `# Imágenes de: ${source.pageUrl}\nImágenes reales extraídas de la página. Úsalas en las secciones correspondientes.${fillUnsplash ? ' Las marcadas [UNSPLASH] son de relleno genérico, no reales.' : ''}`;
   } else {
@@ -291,7 +299,7 @@ export function buildImageMarkdown(
     for (const entry of group) {
       const dims = entry.width && entry.height ? ` — ${entry.width}×${entry.height}` : '';
       const altStr = entry.alt ? ` — alt: "${entry.alt}"` : '';
-      const unsplashTag = entry.isUnsplash ? ' — [UNSPLASH — relleno genérico, reemplazar]' : '';
+      const unsplashTag = entry.isUnsplash ? ' — [PLACEHOLDER — reemplazar antes de publicar]' : '';
       parts.push(`- ${entry.url}${altStr}${dims}${unsplashTag}`);
     }
     parts.push('');

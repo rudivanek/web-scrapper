@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.30 | Last Updated: 2026-08-03T00:00:00Z -->
+<!-- Version: 8.31 | Last Updated: 2026-08-04T00:00:00Z -->
 
 ---
 
@@ -3025,3 +3025,58 @@ When the user has supplied a free-form structure, the section names are now take
 - "Traer mi propio contenido" with a numbered document pasted into Libre: `images.md` lists one Unsplash URL per section, each tagged `[UNSPLASH — relleno genérico, reemplazar]`.
 - "Clonar un sitio": `images.md` contains the site's real images exactly as before.
 - Manual with image source Unsplash and NO free-form text: behaviour unchanged from today.
+
+---
+
+## Replace the dead placeholder service, and stop hiding the image source (Step 33)
+
+**Added:** 2026-08-04
+
+Two related problems, both visible in a real run of "Traer mi propio contenido":
+
+1. **The placeholder URLs were dead.** `buildUnsplashUrl` built `https://source.unsplash.com/...` URLs — a service Unsplash discontinued. The builder inserted the `<img>` tags correctly but every one failed to load, so the page looked image-free.
+2. **The user could not see or change the image source in this preset.** The preset set `imageSource: 'unsplash'` automatically, and the radio was gated on `isManual`, so the decision was invisible. Users whose client already has a website had no way to point images at it without abandoning the preset.
+
+### Part A — Working placeholders
+
+#### `src/lib/imageExporter.ts`
+
+- **`buildUnsplashUrl` replaced with `buildPlaceholderUrl`** — builds `https://placehold.co/1600x900/e8e8e8/8a8a8a?text=<section>` URLs instead of the dead Unsplash source URLs. A labelled grey box renders, holds the layout open, and names the section it belongs to so the replacement is obvious.
+- **Call site updated** — `url: buildPlaceholderUrl(sec)`, `alt: "Placeholder — <sec>"`, `width: 1600`, `height: 900` (was `alt: ''`, `width: null`, `height: null`).
+- **Header wording made honest** — was `# Imágenes de: Unsplash (genéricas)`, now `# Imágenes: placeholders genéricos` with a note that none are real and instructions for sections with multiple cards.
+- **Tag wording updated** — was `[UNSPLASH — relleno genérico, reemplazar]`, now `[PLACEHOLDER — reemplazar antes de publicar]`.
+- **`isUnsplash` field name kept** — it is read in several places and renaming it is out of scope.
+
+### Part B — Show the image source in the "Traer mi propio contenido" preset
+
+#### `src/components/DesignExtractor.tsx`
+
+- **Copy URL visibility** — `copyUrl` now visible when `preset === 'content'` (was `isManual` only). A client who already has a website can point images at that URL.
+- **Image source radio visibility** — `imageSourceRadio` now visible when `preset === 'content'` (was `isManual` only). The user can see and override the Unsplash default.
+- **Helper text for copy URL in content preset** — when `preset === 'content'`, a helper line appears beneath the copy URL field explaining: "Opcional. Tu texto ya es el contenido de la página — esta URL sirve sólo para tomar imágenes reales (por ejemplo el sitio actual del cliente). Déjala vacía para usar placeholders genéricos."
+- **Preset defaults unchanged** — `applyPreset('content')` still sets `imageSource: 'unsplash'` and clears `structureUrl`. It is now a visible, overridable default rather than a hidden decision.
+
+### Part C — config.md must not contradict the UI
+
+#### `src/lib/configReport.ts`
+
+- **Image origin row** — when `imageSource === 'unsplash'`, now reads `Placeholders genéricos (ninguna imagen real)` instead of `Unsplash (genéricas)`.
+- **Fill option row** — now reads `Rellenar huecos con placeholders` instead of `Rellenar con Unsplash`.
+- **JSON block unchanged** — `imageSource: "unsplash"` stays as the stored value.
+
+### Files Changed (exactly three)
+
+| File | Change |
+|---|---|
+| `src/lib/imageExporter.ts` | Replaced `buildUnsplashUrl` with `buildPlaceholderUrl` (placehold.co URLs); updated call site with alt/width/height; updated header wording and tag wording |
+| `src/components/DesignExtractor.tsx` | Made copy URL and image source radio visible for `preset === 'content'`; added helper text for copy URL in content preset |
+| `src/lib/configReport.ts` | Updated image origin and fill option wording to say "placeholders" instead of "Unsplash" |
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in any modified file.
+- `npm run build`: succeeded, exit 0.
+- No occurrence of `source.unsplash.com` remains anywhere in `src/`.
+- "Traer mi propio contenido" with no copy URL: `images.md` contains `placehold.co` URLs, one per section, each tagged `[PLACEHOLDER — reemplazar antes de publicar]`.
+- "Traer mi propio contenido" WITH a copy URL and image source set to "del sitio de texto/copy": `images.md` contains that site's real image URLs.
+- "Clonar un sitio": unchanged, real images from the scraped site.

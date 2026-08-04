@@ -116,7 +116,7 @@ export function buildConfigReport(input: ConfigReportInput): string {
   const imageOrigin = imageSource === 'copy'
     ? contentUrl
     : imageSource === 'unsplash'
-      ? 'Unsplash (genéricas)'
+      ? 'Placeholders genéricos (ninguna imagen real)'
       : designUrl;
 
   const structure = sectionCount === null
@@ -146,7 +146,7 @@ export function buildConfigReport(input: ConfigReportInput): string {
   lines.push('');
   lines.push(`- Generar lista de secciones: ${yesNo(generateBlueprint)}`);
   lines.push(`- Lorem Ipsum: ${yesNo(copyMode === 'lorem')}`);
-  lines.push(`- Rellenar con Unsplash: ${yesNo(fillUnsplash)}`);
+  lines.push(`- Rellenar huecos con placeholders: ${yesNo(fillUnsplash)}`);
   lines.push(`- design.md propio: ${yesNo(designSource === 'own')}`);
   lines.push(`- Instrucciones de layout: ${yesNo(hasInstructions(blueprintJson))}`);
   lines.push('');

@@ -601,11 +601,11 @@ export function DesignExtractor() {
   const isManual = preset === 'manual';
   /** Which controls this preset needs on screen. Everything else moves to Avanzado. */
   const shows = {
-    copyUrl: isManual || (preset === 'restyle' && restyleSource === 'url'),
+    copyUrl: isManual || (preset === 'restyle' && restyleSource === 'url') || preset === 'content',
     designSourceRadio: isManual,
     ownDesignBox: isManual || (preset === 'restyle' && restyleSource === 'file'),
     copySourceRadio: isManual,
-    imageSourceRadio: isManual,
+    imageSourceRadio: isManual || preset === 'content',
     blueprintCheckbox: isManual,
     unsplash: true,
   };
@@ -1424,6 +1424,13 @@ export function DesignExtractor() {
           />
           {structureUrlError && (
             <p className="mt-1 text-xs text-red-600">{structureUrlError}</p>
+          )}
+          {preset === 'content' && (
+            <p className="text-xs text-gray-500 mt-1">
+              Opcional. Tu texto ya es el contenido de la página — esta URL sirve sólo para tomar
+              imágenes reales (por ejemplo el sitio actual del cliente). Déjala vacía para usar
+              placeholders genéricos.
+            </p>
           )}
         </div>
         )}
