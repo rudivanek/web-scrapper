@@ -1418,7 +1418,15 @@ export function DesignExtractor() {
             value={structureUrl}
             onChange={e => setStructureUrl(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !isRunning && handleExtract()}
-            placeholder={outputMode === 'blueprinter' ? (copyMode === 'lorem' ? 'Solo se usa para imágenes si el origen de imágenes es "copy"' : 'De dónde extraer el texto. Vacío = usar la URL de arriba.') : 'Déjalo vacío para usar la misma URL para todo'}
+            placeholder={
+              preset === 'content'
+                ? 'Sitio del cliente — solo para tomar imágenes reales. Vacío = placeholders.'
+                : outputMode === 'blueprinter'
+                  ? (copyMode === 'lorem'
+                      ? 'Solo se usa para imágenes si el origen de imágenes es "copy"'
+                      : 'De dónde extraer el texto. Vacío = usar la URL de arriba.')
+                  : 'Déjalo vacío para usar la misma URL para todo'
+            }
             disabled={isRunning || (outputMode === 'blueprinter' && copyMode === 'lorem' && imageSource !== 'copy')}
             className="w-full border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:border-gray-600 focus:ring-1 focus:ring-gray-600 disabled:opacity-50"
           />
@@ -1489,10 +1497,10 @@ export function DesignExtractor() {
         {outputMode === 'blueprinter' && (
           <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
             <p className="text-sm font-medium text-gray-700">Imágenes</p>
-            {!shows.imageSourceRadio || (!isDualUrl && !fillUnsplash) ? (
+            {!shows.imageSourceRadio ? (
               <p className="text-xs text-gray-500">
                 {imageSource === 'unsplash'
-                  ? 'Se usan imágenes genéricas de Unsplash.'
+                  ? 'Se usan placeholders genéricos: recuadros grises con el nombre de cada sección, para reemplazar después.'
                   : `Se toman de ${
                       imageSource === 'copy' && isDualUrl
                         ? hostname(structureUrl)
@@ -1532,7 +1540,7 @@ export function DesignExtractor() {
                   <span className="text-sm text-gray-700">De la URL de texto/copy ({hostname(structureUrl)})</span>
                 </label>
               )}
-              {fillUnsplash && (
+              {(fillUnsplash || imageSource === 'unsplash') && (
                 <label className="flex items-center space-x-2 cursor-pointer">
                   <input
                     type="radio"
@@ -1543,7 +1551,7 @@ export function DesignExtractor() {
                     disabled={isRunning}
                     className="w-4 h-4"
                   />
-                  <span className="text-sm text-gray-700">Solo Unsplash (genéricas)</span>
+                  <span className="text-sm text-gray-700">Solo placeholders genéricos</span>
                 </label>
               )}
             </div>
@@ -1554,12 +1562,17 @@ export function DesignExtractor() {
                 checked={fillUnsplash}
                 onChange={e => {
                   setFillUnsplash(e.target.checked);
-                  if (!e.target.checked && imageSource === 'unsplash') setImageSource('design');
+                  // Only fall back when the placeholder option would otherwise vanish from
+                  // the list. In the 'content' preset placeholders are the deliberate
+                  // default, so unticking the fill option must not silently change it.
+                  if (!e.target.checked && imageSource === 'unsplash' && preset !== 'content') {
+                    setImageSource('design');
+                  }
                 }}
                 disabled={isRunning}
                 className="w-4 h-4"
               />
-              <span className="text-sm text-gray-700">Rellenar huecos con imágenes de Unsplash (genéricas)</span>
+              <span className="text-sm text-gray-700">Rellenar huecos con placeholders genéricos</span>
             </label>
           </div>
         )}

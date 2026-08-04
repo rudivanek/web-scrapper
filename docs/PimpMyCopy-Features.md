@@ -1,6 +1,6 @@
 # PimpMyCopy (Sharpen Studio) — Features Documentation
 
-<!-- Version: 8.31 | Last Updated: 2026-08-04T00:00:00Z -->
+<!-- Version: 8.32 | Last Updated: 2026-08-04T00:00:00Z -->
 
 ---
 
@@ -3080,3 +3080,52 @@ Two related problems, both visible in a real run of "Traer mi propio contenido":
 - "Traer mi propio contenido" with no copy URL: `images.md` contains `placehold.co` URLs, one per section, each tagged `[PLACEHOLDER — reemplazar antes de publicar]`.
 - "Traer mi propio contenido" WITH a copy URL and image source set to "del sitio de texto/copy": `images.md` contains that site's real image URLs.
 - "Clonar un sitio": unchanged, real images from the scraped site.
+
+---
+
+## Make the image source control actually visible and coherent (Step 34)
+
+**Added:** 2026-08-04
+
+Step 33 set `shows.imageSourceRadio` true for the "Traer mi propio contenido" preset, but the control still did not appear, and the surrounding text contradicted itself. Five defects fixed, all in `src/components/DesignExtractor.tsx`.
+
+### Defect 1 — the radio group never rendered
+
+The render condition had a second clause `(!isDualUrl && !fillUnsplash)` that overrode the visibility flag. With no copy URL and no Unsplash fill, it was always true, so static text showed instead of the radios. Fixed by removing the second clause — `shows.imageSourceRadio` is now the sole flag that decides visibility.
+
+### Defect 2 — the active option was missing from the list
+
+The placeholder radio only rendered when `fillUnsplash` was on. The "Traer mi propio contenido" preset sets `imageSource: 'unsplash'` WITHOUT setting `fillUnsplash`, so the currently-selected option was absent from the group. Fixed by rendering the option when `fillUnsplash || imageSource === 'unsplash'` — an option that is currently selected must always be visible.
+
+### Defect 3 — unticking the fill checkbox silently changed the image source
+
+Unticking the fill checkbox would reset `imageSource` from `'unsplash'` to `'design'` even in the content preset, where placeholders are the deliberate default. Fixed by adding `preset !== 'content'` to the condition — in the content preset, unticking the fill option no longer silently changes the image source.
+
+### Defect 4 — the copy URL placeholder described the wrong purpose
+
+The field read "De dónde extraer el texto. Vacío = usar la URL de arriba." — directly contradicting the helper line beneath it. In the content preset the user's own text IS the copy, so this URL has nothing to do with text. Fixed with a preset-specific placeholder: "Sitio del cliente — solo para tomar imágenes reales. Vacío = placeholders."
+
+### Defect 5 — the wording still said Unsplash
+
+Step 33 replaced the dead Unsplash service with labelled grey placeholders and updated `images.md`, but the UI still named Unsplash. Three strings updated:
+- Static text: "Se usan imágenes genéricas de Unsplash." → "Se usan placeholders genéricos: recuadros grises con el nombre de cada sección, para reemplazar después."
+- Radio label: "Solo Unsplash (genéricas)" → "Solo placeholders genéricos"
+- Checkbox label: "Rellenar huecos con imágenes de Unsplash (genéricas)" → "Rellenar huecos con placeholders genéricos"
+
+No occurrence of the word "Unsplash" remains in user-facing UI strings for the image source area.
+
+### Files Changed (exactly one)
+
+| File | Change |
+|---|---|
+| `src/components/DesignExtractor.tsx` | Fixed radio visibility condition, placeholder radio visibility, fill checkbox onChange logic, copy URL placeholder text, and three Unsplash wording strings |
+
+### Verification
+
+- `npx tsc --noEmit -p tsconfig.app.json`: 17 errors before and after, all pre-existing. Zero errors in the modified file.
+- `npm run build`: succeeded, exit 0.
+- "Traer mi propio contenido" with NO copy URL: image source radios visible, "Solo placeholders genéricos" selected.
+- "Traer mi propio contenido" WITH a copy URL: third option naming that hostname appears and is selectable.
+- "Clonar un sitio": no image radios, static text reading "Se toman de {hostname}."
+- "Configurar a mano": behaviour unchanged.
+- No "Unsplash" in user-facing UI strings for the image source area.
